@@ -1,66 +1,53 @@
-// tinker.sv
-// ---------------------------------------------------------------------
-// Single-file design containing:
-//   1) instruction_decoder
-//   2) register_file
-//   3) alu_fpu
-//   4) tinker_core (top-level)
-// 
-// The top-level tinker_core has one input [31:0] instruction and
-// instantiates the other modules. The instruction decoder extracts
-// opcode, registers, immediate, and sets a 4-bit alu_op. The alu_fpu
-// uses that 4-bit code to perform the correct operation.
-// ---------------------------------------------------------------------
 
 // 1) Instruction Decoder
 module instruction_decoder(
     input  [31:0] instruction,
-    output reg [4:0]  opcode,  // [31:27]
-    output reg [4:0]  rd,      // [26:22]
-    output reg [4:0]  rs,      // [21:17]
-    output reg [4:0]  rt,      // [16:12]
-    output reg [11:0] literal, // [11:0]
+    output reg [4:0] opcode, 
+    output reg [4:0] rd,    
+    output reg [4:0] rs,    
+    output reg [4:0] rt,      
+    output reg [11:0] literal, 
     
     // 4-bit ALU opcode
-    output reg [3:0]  alu_op,
+    output reg [3:0] alu_op,
     
     // Control signals
-    output reg        is_immediate,
-    output reg        reg_write_enable,
-    output reg        is_float
+    output reg is_immediate,
+    output reg reg_write_enable,
+    output reg is_float
 );
 
     // ALU operation codes (4 bits)
-    localparam ALU_ADD  = 4'b0000;
-    localparam ALU_SUB  = 4'b0001;
-    localparam ALU_MUL  = 4'b0010;
-    localparam ALU_DIV  = 4'b0011;
-    localparam ALU_SHR  = 4'b0100; // Shift right
-    localparam ALU_SHL  = 4'b0101; // Shift left
-    localparam ALU_AND  = 4'b0110;
-    localparam ALU_OR   = 4'b0111;
-    localparam ALU_XOR  = 4'b1000;
-    localparam ALU_NOT  = 4'b1001;
+    localparam ALU_ADD = 4'b0000;
+    localparam ALU_SUB = 4'b0001;
+    localparam ALU_MUL = 4'b0010;
+    localparam ALU_DIV = 4'b0011;
+    localparam ALU_SHR = 4'b0100; 
+    localparam ALU_SHL = 4'b0101; 
+    localparam ALU_AND = 4'b0110;
+    localparam ALU_OR = 4'b0111;
+    localparam ALU_XOR = 4'b1000;
+    localparam ALU_NOT = 4'b1001;
 
     always @(*) begin
         // Extract fields from instruction
-        opcode   = instruction[31:27];
-        rd       = instruction[26:22];
-        rs       = instruction[21:17];
-        rt       = instruction[16:12];
-        literal  = instruction[11:0];
+        opcode = instruction[31:27];
+        rd = instruction[26:22];
+        rs = instruction[21:17];
+        rt = instruction[16:12];
+        literal = instruction[11:0];
         
         // Default control signals
-        is_immediate     = 0;
+        is_immediate = 0;
         reg_write_enable = 1;
-        is_float         = 0;
-        alu_op           = ALU_ADD; // default to ADD, can be overridden below
+        is_float = 0;
+        alu_op = ALU_ADD; // default to ADD, can be overridden below
 
         case (opcode)
             // Integer Arithmetic (From Tinker Manual: 0x18..0x1D)
             5'b11000: alu_op = ALU_ADD;  // add  (0x18)
             5'b11001: begin             // addi (0x19)
-                alu_op       = ALU_ADD;
+                alu_op = ALU_ADD;
                 is_immediate = 1;
             end
             5'b11010: alu_op = ALU_SUB;  // sub  (0x1A)
@@ -80,24 +67,21 @@ module instruction_decoder(
             // Shift instructions (0x4..0x7)
             5'b00100: alu_op = ALU_SHR;  // shftr (0x4)
             5'b00101: begin             // shftri (0x5)
-                alu_op       = ALU_SHR;
+                alu_op = ALU_SHR;
                 is_immediate = 1;
             end
             5'b00110: alu_op = ALU_SHL;  // shftl (0x6)
             5'b00111: begin             // shftli (0x7)
-                alu_op       = ALU_SHL;
+                alu_op = ALU_SHL;
                 is_immediate = 1;
             end
             
             // Data Movement (0x11..0x12)
             5'b10001: begin // mov rd, rs (0x11)
-                // We'll do pass-through by reusing ALU_ADD with b=0 or something,
-                // but it's simpler to just treat it as ALU_ADD with rt=0.
                 alu_op = ALU_ADD;
-                // Some folks do: rt = 5'b0; // but that might get masked out in some flows
             end
             5'b10010: begin // mov rd, L (0x12)
-                alu_op       = ALU_ADD;
+                alu_op = ALU_ADD;
                 is_immediate = 1;
             end
             
@@ -127,16 +111,12 @@ module instruction_decoder(
     end
 endmodule
 
-
-// 2) Register File
-// The autograder might expect a packed array named "registers" in some designs.
-// If not required, you can keep it as is, or rename the internal array.
 module register_file(
-    input  [4:0] rs_addr,
-    input  [4:0] rt_addr,
-    input  [4:0] rd_addr,
-    input  [63:0] write_data,
-    input         write_enable,
+    input [4:0] rs_addr,
+    input [4:0] rt_addr,
+    input [4:0] rd_addr,
+    input [63:0] write_data,
+    input write_enable,
     output [63:0] rs_data,
     output [63:0] rt_data
 );
@@ -165,13 +145,12 @@ endmodule
 // 3) ALU / FPU Combined
 // 4-bit op codes for integer arithmetic, logic, shift, etc.
 module alu_fpu(
-    input  [63:0] a,
-    input  [63:0] b,
-    input  [3:0]  op,
-    input         is_float,
+    input [63:0] a,
+    input [63:0] b,
+    input [3:0] op,
+    input is_float,
     output reg [63:0] result
 );
-    // We'll store floating values in real types for simulation
     real float_a, float_b, float_res;
     
     // 4-bit ALU codes
@@ -208,7 +187,7 @@ module alu_fpu(
                 ALU_ADD: result = a + b;
                 ALU_SUB: result = a - b;
                 ALU_MUL: result = a * b;
-                ALU_DIV: result = (b != 0) ? (a / b) : 64'd0; // simplistic
+                ALU_DIV: result = (b != 0) ? (a / b) : 64'd0; 
                 ALU_SHR: result = a >> b[5:0];
                 ALU_SHL: result = a << b[5:0];
                 ALU_AND: result = a & b;
@@ -229,8 +208,8 @@ module tinker_core(
     // Wires for decoder
     wire [4:0] opcode, rd, rs, rt;
     wire [11:0] literal;
-    wire [3:0]  alu_op;
-    wire        is_immediate, reg_write_enable, is_float;
+    wire [3:0] alu_op;
+    wire is_immediate, reg_write_enable, is_float;
     
     // Wires for register file
     wire [63:0] rs_data, rt_data;
@@ -264,9 +243,7 @@ module tinker_core(
     );
     
     // Construct second operand: if immediate, sign-extend literal
-    wire [63:0] imm_ext = {{52{literal[11]}}, literal};
-    wire [63:0] operand_b = is_immediate ? imm_ext : rt_data;
-    
+
     // ALU/FPU
     alu_fpu alu_unit(
         .a(rs_data),
