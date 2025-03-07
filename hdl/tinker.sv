@@ -200,25 +200,29 @@ module alu_fpu(
     end
 endmodule
 
-
-// 4) Top-Level: tinker_core
 module tinker_core(
-    input [31:0] instruction
-    output [63:0] result_out   // Added output port
+    input [31:0] instruction,
+    output [63:0] result_out  // Expose the result externally if needed
 );
     // Wires for decoder
     wire [4:0] opcode, rd, rs, rt;
     wire [11:0] literal;
-    wire [3:0]  alu_op;
-    wire        is_immediate, reg_write_enable, is_float;
+    wire [3:0] alu_op;
+    wire is_immediate, reg_write_enable, is_float;
     
     // Wires for register file
     wire [63:0] rs_data, rt_data;
     
-    // Wires for ALU/FPU result
+    // Wire for ALU/FPU result
     wire [63:0] result;
     
-    // Instantiate decoder
+    // --- Declare and assign operand_b ---
+    // If is_immediate is true, sign-extend the 12-bit literal to 64 bits.
+    // Otherwise, use the data from rt_data.
+    wire [63:0] operand_b;
+    assign operand_b = is_immediate ? {{52{literal[11]}}, literal} : rt_data;
+    
+    // Instantiate the decoder
     instruction_decoder decoder(
         .instruction(instruction),
         .opcode(opcode),
@@ -232,7 +236,7 @@ module tinker_core(
         .is_float(is_float)
     );
     
-    // Instantiate register file
+    // Instantiate the register file
     register_file reg_file(
         .rs_addr(rs),
         .rt_addr(rt),
@@ -243,11 +247,7 @@ module tinker_core(
         .rt_data(rt_data)
     );
     
-    // Construct second operand: if immediate, sign-extend literal
-    wire [63:0] imm_ext = {{52{literal[11]}}, literal};
-    wire [63:0] operand_b = is_immediate ? imm_ext : rt_data;
-    
-    // ALU/FPU
+    // Instantiate the ALU/FPU
     alu_fpu alu_unit(
         .a(rs_data),
         .b(operand_b),
@@ -255,6 +255,8 @@ module tinker_core(
         .is_float(is_float),
         .result(result)
     );
+    
+    // Expose the internal result externally
     assign result_out = result;
-
+    
 endmodule
