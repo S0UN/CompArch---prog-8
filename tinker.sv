@@ -2,7 +2,7 @@ module tinker_core(
     input [31:0] instruction
 );
     // Instruction decoding
-    wire [3:0] opcode;
+    wire [4:0] opcode;
     wire [4:0] rd, rs, rt;
     wire [11:0] literal;
     wire [2:0] alu_op;
@@ -50,7 +50,7 @@ endmodule
 // Instruction Decoder
 module instruction_decoder(
     input [31:0] instruction,
-    output reg [3:0] opcode,
+    output reg [4:0] opcode,
     output reg [4:0] rd, rs, rt,
     output reg [11:0] literal,
     output reg [2:0] alu_op,
@@ -59,12 +59,12 @@ module instruction_decoder(
     output reg is_float
 );
     always @(*) begin
-        // Default values
-        opcode = instruction[31:28];
-        rd = instruction[27:23];
-        rs = instruction[22:18];
-        rt = instruction[17:13];
-        literal = instruction[17:6];
+        // Correct bit positions
+        opcode = instruction[31:27];
+        rd = instruction[26:22];
+        rs = instruction[21:17];
+        rt = instruction[16:12];
+        literal = instruction[11:0];
         is_immediate = 0;
         reg_write_enable = 1;
         is_float = 0;
@@ -72,80 +72,79 @@ module instruction_decoder(
         
         case(opcode)
             // Integer Arithmetic Instructions
-            4'h18: begin // add rd, rs, rt
+            5'b11000: begin // add rd, rs, rt (0x18)
                 alu_op = 3'b000;
             end
-            4'h19: begin // addi rd, L
+            5'b11001: begin // addi rd, L (0x19)
                 alu_op = 3'b000;
                 is_immediate = 1;
             end
-            4'h1a: begin // sub rd, rs, rt
+            5'b11010: begin // sub rd, rs, rt (0x1a)
                 alu_op = 3'b001;
             end
-            4'h1b: begin // subi rd, L
+            5'b11011: begin // subi rd, L (0x1b)
                 alu_op = 3'b001;
                 is_immediate = 1;
             end
-            4'h1c: begin // mul rd, rs, rt
+            5'b11100: begin // mul rd, rs, rt (0x1c)
                 alu_op = 3'b010;
             end
-            4'h1d: begin // div rd, rs, rt
+            5'b11101: begin // div rd, rs, rt (0x1d)
                 alu_op = 3'b011;
             end
             
             // Logic instructions
-            4'h0: begin // and rd, rs, rt
+            5'b00000: begin // and rd, rs, rt (0x0)
                 alu_op = 3'b100;
             end
-            4'h1: begin // or rd, rs, rt
+            5'b00001: begin // or rd, rs, rt (0x1)
                 alu_op = 3'b101;
             end
-            4'h2: begin // xor rd, rs, rt
+            5'b00010: begin // xor rd, rs, rt (0x2)
                 alu_op = 3'b110;
             end
-            4'h3: begin // not rd, rs
+            5'b00011: begin // not rd, rs (0x3)
                 alu_op = 3'b111;
             end
-            4'h4: begin // shftr rd, rs, rt
-                alu_op = 3'b000;
+            5'b00100: begin // shftr rd, rs, rt (0x4)
+                alu_op = 3'b100;
             end
-            4'h5: begin // shftri rd, L
+            5'b00101: begin // shftri rd, L (0x5)
                 alu_op = 3'b000;
                 is_immediate = 1;
             end
-            4'h6: begin // shftl rd, rs, rt
-                alu_op = 3'b001;
+            5'b00110: begin // shftl rd, rs, rt (0x6)
+                alu_op = 3'b101;
             end
-            4'h7: begin // shftli rd, L
+            5'b00111: begin // shftli rd, L (0x7)
                 alu_op = 3'b001;
                 is_immediate = 1;
             end
             
             // Data Movement Instructions (excluding memory access)
-            4'h11: begin // mov rd, rs
+            5'b10001: begin // mov rd, rs (0x11)
                 alu_op = 3'b000; // Use ALU as pass-through
-                rs = instruction[22:18];
                 rt = 5'b0;
             end
-            4'h12: begin // mov rd, L
+            5'b10010: begin // mov rd, L (0x12)
                 alu_op = 3'b000;
                 is_immediate = 1;
             end
             
             // Floating Point Instructions
-            4'h14: begin // addf rd, rs, rt
+            5'b10100: begin // addf rd, rs, rt (0x14)
                 alu_op = 3'b000;
                 is_float = 1;
             end
-            4'h15: begin // subf rd, rs, rt
+            5'b10101: begin // subf rd, rs, rt (0x15)
                 alu_op = 3'b001;
                 is_float = 1;
             end
-            4'h16: begin // mulf rd, rs, rt
+            5'b10110: begin // mulf rd, rs, rt (0x16)
                 alu_op = 3'b010;
                 is_float = 1;
             end
-            4'h17: begin // divf rd, rs, rt
+            5'b10111: begin // divf rd, rs, rt (0x17)
                 alu_op = 3'b011;
                 is_float = 1;
             end
@@ -210,6 +209,7 @@ module alu_fpu(
                 3'b001: float_result = float_a - float_b;  // Subtract
                 3'b010: float_result = float_a * float_b;  // Multiply
                 3'b011: float_result = float_a / float_b;  // Divide
+
                 default: float_result = 0.0;
             endcase
             
@@ -222,7 +222,10 @@ module alu_fpu(
                 3'b001: result = a - b;  // Subtract
                 3'b010: result = a * b;  // Multiply
                 3'b011: result = a / b;  // Divide
-                
+    
+                3'b100: result = a >> b[5:0]; // SHIFT RIGHT
+                3'b101: result = a << b[5:0]; // SHIFT LEFT
+
                 // Logic operations
                 3'b100: result = a & b;  // AND
                 3'b101: result = a | b;  // OR
