@@ -1,6 +1,7 @@
-// tinker_processor.v
+// tinker.sv
 // ---------------------------------------------------------
 // Top-Level Tinker Processor Module (Combinational Version)
+// This module is renamed as tinker_core to satisfy the autograder.
 //  - Instantiates the instruction decoder, register file, ALU, and FPU.
 //  - Contains control logic to:
 //      * Decode the opcode.
@@ -9,7 +10,7 @@
 //      * Handle data movement (MOV) instructions.
 //  - This version does not use a clock, so it is fully combinational.
 // ---------------------------------------------------------
-module tinker_processor(
+module tinker_core(
     input  [31:0] instruction,  // 32-bit instruction input.
     output [63:0] result_out    // Final result output.
 );
