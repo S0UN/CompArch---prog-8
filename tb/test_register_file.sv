@@ -1,4 +1,3 @@
-`include "../hdl/tinker.sv"
 
 module test_register_file;
     reg [4:0] rs_addr, rt_addr, rd_addr;

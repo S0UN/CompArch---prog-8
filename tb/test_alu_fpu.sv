@@ -1,4 +1,3 @@
-`include "../hdl/tinker.sv"
 
 module test_alu_fpu;
     reg [63:0] a, b;

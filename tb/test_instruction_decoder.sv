@@ -1,4 +1,3 @@
-`include "../hdl/tinker.sv"
 
 module test_instruction_decoder;
     reg [31:0] instruction;
