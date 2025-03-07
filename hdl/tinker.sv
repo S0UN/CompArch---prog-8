@@ -204,6 +204,7 @@ endmodule
 // 4) Top-Level: tinker_core
 module tinker_core(
     input [31:0] instruction
+    output [63:0] result_out   // Added output port
 );
     // Wires for decoder
     wire [4:0] opcode, rd, rs, rt;
@@ -254,4 +255,6 @@ module tinker_core(
         .is_float(is_float),
         .result(result)
     );
+    assign result_out = result;
+
 endmodule
