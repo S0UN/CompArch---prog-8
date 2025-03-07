@@ -107,14 +107,14 @@ module instruction_decoder(
                 alu_op = 3'b111;
             end
             5'b00100: begin // shftr rd, rs, rt (0x4)
-                alu_op = 3'b000;
+                alu_op = 3'b100;
             end
             5'b00101: begin // shftri rd, L (0x5)
                 alu_op = 3'b000;
                 is_immediate = 1;
             end
             5'b00110: begin // shftl rd, rs, rt (0x6)
-                alu_op = 3'b001;
+                alu_op = 3'b101;
             end
             5'b00111: begin // shftli rd, L (0x7)
                 alu_op = 3'b001;
@@ -209,6 +209,7 @@ module alu_fpu(
                 3'b001: float_result = float_a - float_b;  // Subtract
                 3'b010: float_result = float_a * float_b;  // Multiply
                 3'b011: float_result = float_a / float_b;  // Divide
+
                 default: float_result = 0.0;
             endcase
             
@@ -221,7 +222,10 @@ module alu_fpu(
                 3'b001: result = a - b;  // Subtract
                 3'b010: result = a * b;  // Multiply
                 3'b011: result = a / b;  // Divide
-                
+    
+                3'b100: result = a >> b[5:0]; // SHIFT RIGHT
+                3'b101: result = a << b[5:0]; // SHIFT LEFT
+
                 // Logic operations
                 3'b100: result = a & b;  // AND
                 3'b101: result = a | b;  // OR
