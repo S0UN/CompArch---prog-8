@@ -1,32 +1,45 @@
-# Makefile for compiling and running modules and testbenches
+# Compiler and Simulator
+COMPILER = iverilog
+SIMULATOR = vvp
 
-# Compile and run a module
-mod_%:
-	iverilog -g2012 -o sim/$*.vvp mod/$*.sv
-	vvp sim/$*.vvp > out/$*.out
+# Directories
+HDL_DIR = hdl
+TEST_DIR = test
+VVP_DIR = vvp
+OUTPUT_DIR = testOutputs
 
-# Compile and run a testbench
-test_%:
-	iverilog -g2012 -o sim/$*.vvp test/$*_tb.sv
-	vvp sim/$*.vvp > out/$*.out
+# Source and Testbench Files
+SRC_FILE = $(HDL_DIR)/tinker.sv
+TEST_FILES = $(wildcard $(TEST_DIR)/*.sv)
 
-# Compile and run all testbenches
-TEST_NAMES = $(basename $(notdir $(wildcard test/*_tb.sv)))
-TEST_NAMES := $(foreach testname, $(TEST_NAMES), $(subst _tb,,$(testname)))
-all_tests:
-	@echo $(TEST_NAMES)
-	$(foreach testname, $(TEST_NAMES), \
-		iverilog -g2012 -o sim/$(testname).vvp test/$(testname)_tb.sv; \
-		vvp sim/$(testname).vvp > out/$(testname).out;)
+# Create output directories if they don't exist
+$(shell mkdir -p $(VVP_DIR) $(OUTPUT_DIR))
 
-# Evaluate a file (FILE_PATH can be overridden)
-FILE_PATH ?= tko/basic_add.tko
-eval:
-	iverilog -g2012 -o sim/eval.vvp eval.sv
-	vvp sim/eval.vvp +FP=$(FILE_PATH) > out/eval.out
+# Targets
+all: test_alu test_register_file test_instruction_decoder test_tinker_core
 
-# Clean up generated files
+# Test ALU/FPU
+test_alu:
+	$(COMPILER) -g2012 -o $(VVP_DIR)/alu.vvp $(TEST_DIR)/test_alu.sv $(SRC_FILE)
+	$(SIMULATOR) $(VVP_DIR)/alu.vvp > $(OUTPUT_DIR)/alu.out
+
+# Test Register File
+test_register_file:
+	$(COMPILER) -g2012 -o $(VVP_DIR)/register_file.vvp $(TEST_DIR)/test_register_file.sv $(SRC_FILE)
+	$(SIMULATOR) $(VVP_DIR)/register_file.vvp > $(OUTPUT_DIR)/register_file.out
+
+# Test Instruction Decoder
+test_instruction_decoder:
+	$(COMPILER) -g2012 -o $(VVP_DIR)/instruction_decoder.vvp $(TEST_DIR)/test_instruction_decoder.sv $(SRC_FILE)
+	$(SIMULATOR) $(VVP_DIR)/instruction_decoder.vvp > $(OUTPUT_DIR)/instruction_decoder.out
+
+# Test Tinker Core
+test_tinker_core:
+	$(COMPILER) -g2012 -o $(VVP_DIR)/tinker_core.vvp $(TEST_DIR)/test_tinker_core.sv $(SRC_FILE)
+	$(SIMULATOR) $(VVP_DIR)/tinker_core.vvp > $(OUTPUT_DIR)/tinker_core.out
+
+# Clean up
 clean:
-	rm -rf sim/*.vvp out/*.out
+	rm -rf $(VVP_DIR)/*.vvp $(OUTPUT_DIR)/*.out
 
-.PHONY: mod_% test_% all_tests eval clean
+.PHONY: all test_alu test_register_file test_instruction_decoder test_tinker_core clean
