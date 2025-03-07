@@ -1,16 +1,3 @@
-// tinker.sv
-// ---------------------------------------------------------------------
-// Single-file design containing:
-//   1) instruction_decoder
-//   2) register_file
-//   3) alu_fpu
-//   4) tinker_core (top-level)
-// 
-// The top-level tinker_core has one input [31:0] instruction and
-// instantiates the other modules. The instruction decoder extracts
-// opcode, registers, immediate, and sets a 4-bit alu_op. The alu_fpu
-// uses that 4-bit code to perform the correct operation.
-// ---------------------------------------------------------------------
 
 // 1) Instruction Decoder
 module instruction_decoder(
