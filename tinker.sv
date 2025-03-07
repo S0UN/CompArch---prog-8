@@ -107,22 +107,14 @@ module instruction_decoder(
                 alu_op = 3'b111;
             end
             5'b00100: begin // shftr rd, rs, rt (0x4)
-<<<<<<< HEAD
                 alu_op = 3'b100;
-=======
-                alu_op = 3'b000;
->>>>>>> eb18a377747c76443e6ee3f2d0061d92ad11e1a5
             end
             5'b00101: begin // shftri rd, L (0x5)
                 alu_op = 3'b000;
                 is_immediate = 1;
             end
             5'b00110: begin // shftl rd, rs, rt (0x6)
-<<<<<<< HEAD
                 alu_op = 3'b101;
-=======
-                alu_op = 3'b001;
->>>>>>> eb18a377747c76443e6ee3f2d0061d92ad11e1a5
             end
             5'b00111: begin // shftli rd, L (0x7)
                 alu_op = 3'b001;
