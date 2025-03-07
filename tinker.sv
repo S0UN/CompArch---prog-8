@@ -12,6 +12,11 @@
 //
 // There is no clock – the output is immediately visible in the register file.
 // ---------------------------------------------------------
+include "instruction_decoder.v"
+include "reg_file.v"
+include "alu.v"
+include "fpu.v"
+
 module tinker_core(
     input [31:0] instruction  // 32-bit instruction input.
 );
