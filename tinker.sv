@@ -2,11 +2,11 @@
 // 1) Instruction Decoder
 module instruction_decoder(
     input  [31:0] instruction,
-    output reg [4:0]  opcode,  // [31:27]
-    output reg [4:0]  rd,      // [26:22]
-    output reg [4:0]  rs,      // [21:17]
-    output reg [4:0]  rt,      // [16:12]
-    output reg [11:0] literal, // [11:0]
+    output reg [4:0]  opcode, 
+    output reg [4:0]  rd,    
+    output reg [4:0]  rs,    
+    output reg [4:0]  rt,      
+    output reg [11:0] literal, 
     
     // 4-bit ALU opcode
     output reg [3:0]  alu_op,
@@ -22,8 +22,8 @@ module instruction_decoder(
     localparam ALU_SUB  = 4'b0001;
     localparam ALU_MUL  = 4'b0010;
     localparam ALU_DIV  = 4'b0011;
-    localparam ALU_SHR  = 4'b0100; // Shift right
-    localparam ALU_SHL  = 4'b0101; // Shift left
+    localparam ALU_SHR  = 4'b0100; 
+    localparam ALU_SHL  = 4'b0101; 
     localparam ALU_AND  = 4'b0110;
     localparam ALU_OR   = 4'b0111;
     localparam ALU_XOR  = 4'b1000;
@@ -78,10 +78,7 @@ module instruction_decoder(
             
             // Data Movement (0x11..0x12)
             5'b10001: begin // mov rd, rs (0x11)
-                // We'll do pass-through by reusing ALU_ADD with b=0 or something,
-                // but it's simpler to just treat it as ALU_ADD with rt=0.
                 alu_op = ALU_ADD;
-                // Some folks do: rt = 5'b0; // but that might get masked out in some flows
             end
             5'b10010: begin // mov rd, L (0x12)
                 alu_op       = ALU_ADD;
@@ -114,10 +111,6 @@ module instruction_decoder(
     end
 endmodule
 
-
-// 2) Register File
-// The autograder might expect a packed array named "registers" in some designs.
-// If not required, you can keep it as is, or rename the internal array.
 module register_file(
     input  [4:0] rs_addr,
     input  [4:0] rt_addr,
@@ -158,7 +151,6 @@ module alu_fpu(
     input         is_float,
     output reg [63:0] result
 );
-    // We'll store floating values in real types for simulation
     real float_a, float_b, float_res;
     
     // 4-bit ALU codes
@@ -195,7 +187,7 @@ module alu_fpu(
                 ALU_ADD: result = a + b;
                 ALU_SUB: result = a - b;
                 ALU_MUL: result = a * b;
-                ALU_DIV: result = (b != 0) ? (a / b) : 64'd0; // simplistic
+                ALU_DIV: result = (b != 0) ? (a / b) : 64'd0; 
                 ALU_SHR: result = a >> b[5:0];
                 ALU_SHL: result = a << b[5:0];
                 ALU_AND: result = a & b;
