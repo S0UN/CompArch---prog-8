@@ -112,6 +112,7 @@ module instruction_decoder(
 endmodule
 
 module register_file(
+    input clk,
     input  [4:0] rs_addr,
     input  [4:0] rt_addr,
     input  [4:0] rd_addr,
@@ -134,7 +135,7 @@ module register_file(
     assign rt_data = registers[rt_addr];
     
     // Combinational write
-    always @(*) begin
+    always @(posedge clk) begin
         if (write_enable && (rd_addr != 5'd0)) begin
             registers[rd_addr] = write_data;
         end
@@ -200,30 +201,108 @@ module alu_fpu(
     end
 endmodule
 
-module tinker_core(
-    input [31:0] instruction,
-    output [63:0] result_out  // Expose the result externally if needed
+module control(
+    input clk,
+    input reset,
+    input branch,
+    input [31:0] branch_address,
+    output reg [31:0] pc
 );
-    // Wires for decoder
+    always @(posedge clk or posedge reset) begin
+        if (reset)
+            pc <= 32'b0;         
+        else if (branch)
+            pc <= branch_address; 
+        else
+            pc <= pc + 4;         
+    end 
+endmodule
+
+module clock_generator(
+    output reg clk
+);
+    initial begin
+        clk = 0;
+    end
+    
+    always begin
+        #5 clk = ~clk;
+    end
+endmodule
+
+module memory(
+    input clk,
+    input mem_read,
+    input mem_write,
+    input [31:0] address,
+    input [31:0] write_data,
+    output reg [31:0] read_data
+);
+    reg [31:0] mem_array [0:131071];
+
+
+    always @(posedge clk) begin
+        if (mem_write)
+            mem_array[address[16:2]] <= write_data;  
+        if (mem_read)
+            read_data <= mem_array[address[16:2]];
+    end
+endmodule
+
+// Instruction Fetch Stage: connects PC to memory
+module instruction_fetch(
+    input clk,
+    input reset,
+    input mem_read,
+    output [31:0] instruction,
+    input [31:0] pc   // Provided by the program counter
+);
+    memory inst_mem(
+        .clk(clk),
+        .mem_read(mem_read),
+        .mem_write(1'b0),  // No writes during instruction fetch
+        .address(pc),
+        .write_data(32'd0),
+        .read_data(instruction)
+    );
+endmodule
+
+
+// Top-Level Module: tinker_core
+module tinker_core(
+    input clk,
+    input reset
+);
+    // Program Counter 
+    wire [31:0] pc;
+    // For now, no branch instructions are implemented.
+    wire branch = 1'b0;
+    wire [31:0] branch_address = 32'd0;
+    
+    program_counter pc_inst(
+        .clk(clk),
+        .reset(reset),
+        .branch(branch),
+        .branch_address(branch_address),
+        .pc(pc)
+    );
+    
+    // Instruction Fetch 
+    wire [31:0] instruction;
+    instruction_fetch fetch_inst(
+        .clk(clk),
+        .reset(reset),
+        .mem_read(1'b1),
+        .instruction(instruction),
+        pc(pc))
+
+Instruction Decoder 
     wire [4:0] opcode, rd, rs, rt;
     wire [11:0] literal;
     wire [3:0] alu_op;
     wire is_immediate, reg_write_enable, is_float;
     
-    // Wires for register file
-    wire [63:0] rs_data, rt_data;
-    
-    // Wire for ALU/FPU result
-    wire [63:0] result;
-    
-    // --- Declare and assign operand_b ---
-    // If is_immediate is true, sign-extend the 12-bit literal to 64 bits.
-    // Otherwise, use the data from rt_data.
-    wire [63:0] operand_b;
-    assign operand_b = is_immediate ? {{52{literal[11]}}, literal} : rt_data;
-    
-    // Instantiate the decoder
-    instruction_decoder decoder(
+    instruction_decoder decoder_inst(
         .instruction(instruction),
         .opcode(opcode),
         .rd(rd),
@@ -236,8 +315,10 @@ module tinker_core(
         .is_float(is_float)
     );
     
-    // Instantiate the register file
+    // Register File 
+    wire [63:0] rs_data, rt_data;
     register_file reg_file(
+        .clk(clk),
         .rs_addr(rs),
         .rt_addr(rt),
         .rd_addr(rd),
@@ -247,7 +328,12 @@ module tinker_core(
         .rt_data(rt_data)
     );
     
-    // Instantiate the ALU/FPU
+    // ALU/FPU 
+    wire [63:0] result;
+    // Select operand B: either sign-extended immediate or rt_data
+    wire [63:0] operand_b;
+    assign operand_b = is_immediate ? {{52{literal[11]}}, literal} : rt_data;
+    
     alu_fpu alu_unit(
         .a(rs_data),
         .b(operand_b),
@@ -255,8 +341,4 @@ module tinker_core(
         .is_float(is_float),
         .result(result)
     );
-    
-    // Expose the internal result externally
-    assign result_out = result;
-    
 endmodule
