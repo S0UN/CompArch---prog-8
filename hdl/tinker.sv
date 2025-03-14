@@ -134,11 +134,9 @@ module register_file(
     assign rs_data = registers[rs_addr];
     assign rt_data = registers[rt_addr];
     
-    // Combinational write
-    always @(posedge clk) begin
-        if (write_enable && (rd_addr != 5'd0)) begin
-            registers[rd_addr] = write_data;
-        end
+    always @(posedge clk) begin  
+        if (write_enable && (rd_addr != 5'd0))
+            registers[rd_addr] <= write_data;
     end
 endmodule
 
@@ -369,30 +367,57 @@ module reglitmux(
     end
 endmodule
 
+
+// Top-Level Module: tinker_core
 module tinker_core(
     input clk,
     input reset
 );
-    wire [31:0] pc;
-    wire branch = 1'b0;
-    wire [31:0] branch_address = 32'd0;
-    
-    program_counter pc_inst(
-        .clk(clk),
-        .reset(reset),
-        .branch(branch),
-        .branch_address(branch_address),
-        .pc(pc)
-    );
-    
+    // Internal wires
+    wire [63:0] pc, new_pc, mem_data_out;
     wire [31:0] instruction;
-
-
-    
     wire [4:0] opcode, rd, rs, rt;
     wire [11:0] literal;
     wire [3:0] alu_op;
     wire is_immediate, reg_write_enable, is_float;
+    wire [63:0] rs_data, rt_data, alu_result, operand_b;
+    wire [63:0] mem_addr, mem_wr_data;
+    wire mem_wr_en, mem_reg_write;
+
+    // Instantiate Memory
+    memory mem_inst(
+        .addr_pc(pc),
+        .clk(clk),
+        .reset(reset),
+        .write_en(mem_wr_en),
+        .data_in(mem_wr_data),
+        .addr_rw(mem_addr),
+        .data_out(mem_data_out),
+        .inst_out(instruction)
+    );
+
+    // Fetch Unit
+    fetch fetch_inst(
+        .clk(clk),
+        .reset(reset),
+        .sp(64'd0), // Assuming SP not used in basic tests
+        .new_pc(new_pc),
+        .pc_out(pc)
+    );
+
+    // Control Unit
+    control control_inst(
+        .op(opcode),
+        .rd(rd),
+        .rs(rs_data),
+        .rt(rt_data),
+        .lit(literal),
+        .inputPc(pc),
+        .memData(mem_data_out),
+        .pc(new_pc)
+    );
+
+    // Instruction Decoder
     instruction_decoder decoder_inst(
         .instruction(instruction),
         .opcode(opcode),
@@ -405,29 +430,44 @@ module tinker_core(
         .reg_write_enable(reg_write_enable),
         .is_float(is_float)
     );
-    
-    wire [63:0] rs_data, rt_data;
+
+    // Register File
     register_file reg_file(
         .clk(clk),
         .rs_addr(rs),
         .rt_addr(rt),
         .rd_addr(rd),
-        .write_data(result),
+        .write_data(alu_result),
         .write_enable(reg_write_enable),
         .rs_data(rs_data),
         .rt_data(rt_data)
     );
-    
-    wire [63:0] result;
-    wire [63:0] operand_b;
+
+    // ALU Operand Mux
     assign operand_b = is_immediate ? {{52{literal[11]}}, literal} : rt_data;
-    
+
+    // ALU/FPU
     alu_fpu alu_unit(
         .a(rs_data),
         .b(operand_b),
         .op(alu_op),
         .is_float(is_float),
-        .result(result)
+        .result(alu_result)
     );
-endmodule
 
+    // Memory Handler
+    memoryHandler mem_handler(
+        .opcode(opcode),
+        .rd(rd),
+        .rs(rs_data),
+        .rt(rt_data),
+        .lit(literal),
+        .pc(pc),
+        .r31(reg_file.registers[31]), // Stack pointer (r31)
+        .mem_addr(mem_addr),
+        .mem_wr_data(mem_wr_data),
+        .mem_wr_en(mem_wr_en),
+        .mem_reg_write(mem_reg_write)
+    );
+
+endmodule
