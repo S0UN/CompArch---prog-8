@@ -7,108 +7,46 @@ module instruction_decoder(
     output reg [4:0]  rs,    
     output reg [4:0]  rt,      
     output reg [63:0] literal,
-    
-    // 4-bit ALU opcode
-    output reg [3:0]  alu_op,
-    
-    // Control signals
+    output reg [4:0]  alu_op,  // Now 5-bit to match ALU
     output reg        is_immediate,
     output reg        reg_write_enable,
     output reg        is_float
 );
-
-    // ALU operation codes (4 bits)
-    localparam ALU_ADD  = 4'b0000;
-    localparam ALU_SUB  = 4'b0001;
-    localparam ALU_MUL  = 4'b0010;
-    localparam ALU_DIV  = 4'b0011;
-    localparam ALU_SHR  = 4'b0100; 
-    localparam ALU_SHL  = 4'b0101; 
-    localparam ALU_AND  = 4'b0110;
-    localparam ALU_OR   = 4'b0111;
-    localparam ALU_XOR  = 4'b1000;
-    localparam ALU_NOT  = 4'b1001;
-
     always @(*) begin
         // Extract fields from instruction
         opcode = instruction[31:27];
-        rd       = instruction[26:22];
-        rs       = instruction[21:17];
-        rt       = instruction[16:12];
-        literal = {{52{instruction[11]}}, instruction[11:0]}; // Sign-extend to 64 bits
+        rd     = instruction[26:22];
+        rs     = instruction[21:17];
+        rt     = instruction[16:12];
+        literal = {{52{instruction[11]}}, instruction[11:0]};
 
         // Default control signals
         is_immediate     = 0;
         reg_write_enable = 1;
         is_float         = 0;
-        alu_op           = ALU_ADD; // default to ADD, can be overridden below
+        alu_op           = opcode;  // Direct opcode mapping
 
+        // Handle special cases
         case (opcode)
-            // Integer Arithmetic (From Tinker Manual: 0x18..0x1D)
-            5'b11000: alu_op = ALU_ADD;  // add  (0x18)
-            5'b11001: begin             // addi (0x19)
-                alu_op       = ALU_ADD;
+            // Immediate instructions
+            5'b11001, 5'b11011,  // addi, subi
+            5'b00101, 5'b00111,  // shftri, shftli
+            5'b10010: begin      // mov rd, L
                 is_immediate = 1;
-            end
-            5'b11010: alu_op = ALU_SUB;  // sub  (0x1A)
-            5'b11011: begin             // subi (0x1B)
-                alu_op       = ALU_SUB;
-                is_immediate = 1;
-            end
-            5'b11100: alu_op = ALU_MUL;  // mul  (0x1C)
-            5'b11101: alu_op = ALU_DIV;  // div  (0x1D)
-            
-            // Logic instructions (0x0..0x3)
-            5'b00000: alu_op = ALU_AND;  // and (0x0)
-            5'b00001: alu_op = ALU_OR;   // or  (0x1)
-            5'b00010: alu_op = ALU_XOR;  // xor (0x2)
-            5'b00011: alu_op = ALU_NOT;  // not (0x3)
-            
-            // Shift instructions (0x4..0x7)
-            5'b00100: alu_op = ALU_SHR;  // shftr (0x4)
-            5'b00101: begin             // shftri (0x5)
-                alu_op       = ALU_SHR;
+                rs = rd;  // For instructions using rd as source
                 rt = 5'b0;
-                is_immediate = 1;
-            end
-            5'b00110: alu_op = ALU_SHL;  // shftl (0x6)
-            5'b00111: begin             // shftli (0x7)
-                alu_op       = ALU_SHL;
-                is_immediate = 1;
-                rt = 5'b0; 
             end
             
-            // Data Movement (0x11..0x12)
-            5'b10001: begin // mov rd, rs (0x11)
-                alu_op = ALU_ADD;
-            end
-            5'b10010: begin // mov rd, L (0x12)
-                alu_op       = ALU_ADD;
-                is_immediate = 1;
-            end
-            
-            // Floating-Point (0x14..0x17)
-            5'b10100: begin // addf (0x14)
-                alu_op   = ALU_ADD; 
+            // Floating-point instructions
+            5'b10100, 5'b10101, 5'b10110, 5'b10111: 
                 is_float = 1;
-            end
-            5'b10101: begin // subf (0x15)
-                alu_op   = ALU_SUB;
-                is_float = 1;
-            end
-            5'b10110: begin // mulf (0x16)
-                alu_op   = ALU_MUL;
-                is_float = 1;
-            end
-            5'b10111: begin // divf (0x17)
-                alu_op   = ALU_DIV;
-                is_float = 1;
-            end
-            
-            default: begin
-                // Unknown opcode => disable writes
+
+            // Control flow instructions
+            5'b01000, 5'b01001, 5'b01010, 5'b01011, 
+            5'b01100, 5'b01101, 5'b01110: 
                 reg_write_enable = 0;
-            end
+
+            default: reg_write_enable = 1;
         endcase
     end
 endmodule
@@ -167,10 +105,11 @@ module control(
         endcase
     end
 endmodule
+
 module alu_fpu(
     input  [63:0] a,
     input  [63:0] b,
-    input  [3:0]  op,       // Changed to 5-bit opcode
+    input  [4:0]  op,
     input         is_float,
     output reg [63:0] result
 );
@@ -178,44 +117,44 @@ module alu_fpu(
 
     always @(*) begin
         if (is_float) begin
-            // Floating-point operations remain same
             float_a = $bitstoreal(a);
             float_b = $bitstoreal(b);
-            case(op[3:0])  // Use lower 4 bits for float ops
-                4'b0000: float_res = float_a + float_b;
-                4'b0001: float_res = float_a - float_b;
-                4'b0010: float_res = float_a * float_b;
-                4'b0011: float_res = float_a / float_b;
+            case(op)
+                5'b10100: float_res = float_a + float_b;
+                5'b10101: float_res = float_a - float_b;
+                5'b10110: float_res = float_a * float_b;
+                5'b10111: float_res = float_a / float_b;
                 default: float_res = 0.0;
             endcase
             result = $realtobits(float_res);
         end
         else begin
-            // Enhanced integer path with full opcode
             case(op)
-                // Immediate instructions
-                5'b11001: result = a + b;  // addi
-                5'b11011: result = a - b;  // subi
-                5'b00101: result = a >> b[5:0]; // shftri
-                5'b00111: result = a << b[5:0]; // shftli
-                
-                // Regular ALU ops
+                // Arithmetic
                 5'b11000: result = a + b;  // add
+                5'b11001: result = a + b;  // addi
                 5'b11010: result = a - b;  // sub
+                5'b11011: result = a - b;  // subi
                 5'b11100: result = a * b;  // mul
-                5'b11101: result = (b != 0) ? (a / b) : 0; // div
+                5'b11101: result = b != 0 ? a / b : 0;  // div
+
+                // Logic
                 5'b00000: result = a & b;  // and
                 5'b00001: result = a | b;  // or
                 5'b00010: result = a ^ b;  // xor
                 5'b00011: result = ~a;     // not
-                5'b00100: result = a >> b[5:0]; // shftr
-                5'b00110: result = a << b[5:0]; // shftl
-                
+
+                // Shifts
+                5'b00100: result = a >> b[5:0];  // shftr
+                5'b00101: result = a >> b[5:0];  // shftri
+                5'b00110: result = a << b[5:0];  // shftl
+                5'b00111: result = a << b[5:0];  // shftli
+
                 // Data movement
-                5'b10001: result = a;      // mov rd, rs
-                5'b10010: result = {52'b0, b[11:0]}; // mov rd, L
-                
-                default: result = 64'd0;
+                5'b10001: result = a;       // mov rd, rs
+                5'b10010: result = {52'b0, b[11:0]};  // mov rd, L
+
+                default: result = 64'b0;
             endcase
         end
     end
@@ -368,7 +307,7 @@ module tinker_core(
     wire [31:0] instruction;
     wire [4:0] opcode, rd, rs, rt;
     wire [63:0] literal; 
-    wire [3:0] alu_op;
+    wire [4:0] alu_op;
     wire is_immediate, reg_write_enable, is_float;
     wire [63:0] rs_data, rt_data, alu_result, operand_b;
     wire [63:0] mem_addr, mem_wr_data;
