@@ -142,6 +142,37 @@ module register_file(
     end
 endmodule
 
+module control(
+    input [4:0] op,
+	input [63:0] rd,
+	input [63:0] rs,
+	input [63:0] rt,
+	input [63:0] lit,
+	input [63:0] inputPc,
+	input [63:0] memData,
+	output reg [63:0] pc
+);
+	 localparam BR = 5'b01000;
+	 localparam BRR_RD = 5'b01001;
+	 localparam BRR_L = 5'b01010;
+	 localparam BRNZ = 5'b01011;
+	 localparam CALL = 5'b01100;
+	 localparam RET = 5'b01101;
+	 localparam BRGT = 5'b01110;
+	 always @(*) begin
+	  case(op)
+	   BR: pc = rd;
+	   BRR_RD: pc = inputPc + rd;
+	   BRR_L: pc = inputPc + $signed(lit);
+	   BRNZ: pc = (rs != 0) ? rd : inputPc + 4;
+	   CALL: pc = rd;
+	   RET: pc = memData;
+	   BRGT: pc = (rs > rt) ? rd : inputPc + 4;
+	   default: pc = inputPc + 4;
+	  endcase
+	 end
+endmodule
+
 
 // 3) ALU / FPU Combined
 // 4-bit op codes for integer arithmetic, logic, shift, etc.
@@ -201,22 +232,7 @@ module alu_fpu(
     end
 endmodule
 
-module control(
-    input clk,
-    input reset,
-    input branch,
-    input [31:0] branch_address,
-    output reg [31:0] pc
-);
-    always @(posedge clk or posedge reset) begin
-        if (reset)
-            pc <= 32'b0;         
-        else if (branch)
-            pc <= branch_address; 
-        else
-            pc <= pc + 4;         
-    end 
-endmodule
+
 
 module clock_generator(
     output reg clk
@@ -230,52 +246,134 @@ module clock_generator(
     end
 endmodule
 
-module memory(
-    input clk,
-    input mem_read,
-    input mem_write,
-    input [31:0] address,
-    input [31:0] write_data,
-    output reg [31:0] read_data
+module fetch(
+	input clk,
+	input reset,
+	input [63:0] sp,
+	input [63:0] new_pc,
+	output reg [63:0] pc_out
 );
-    reg [31:0] mem_array [0:131071];
+	reg [63:0] curr_pc;
+	assign pc_out = curr_pc;
+	always @(posedge clk or posedge reset) begin
+		if(reset) begin
+			curr_pc <= 64'h2000;
+		end else begin
+			curr_pc <= new_pc;
+		end
+	end
+endmodule
 
 
-    always @(posedge clk) begin
-        if (mem_write)
-            mem_array[address[16:2]] <= write_data;  
-        if (mem_read)
-            read_data <= mem_array[address[16:2]];
+module memoryHandler(
+	input [4:0] opcode,
+	input [63:0] rd, rs, lit, pc, r31,
+	output reg [63:0] mem_addr,
+	output reg [63:0] mem_wr_data,
+	output reg mem_wr_en,
+	output reg mem_reg_write
+);
+	always @(*) begin
+		case(opcode)
+			5'b01100: begin
+				mem_addr = r31 - 8;
+				mem_wr_data = pc + 4;
+				mem_wr_en = 1;
+				mem_reg_write = 0;
+			end
+			5'b01101: begin
+				mem_addr = r31 - 8;
+				mem_wr_data = 0;
+				mem_wr_en = 0;
+				mem_reg_write = 0;
+			end
+			5'b10000: begin
+				mem_addr = rs + lit;
+				mem_wr_data = 0;
+				mem_wr_en = 0;
+				mem_reg_write = 1;
+			end
+			5'b10011: begin
+				mem_addr = rd + lit;
+				mem_wr_data = rs;
+				mem_wr_en = 1;
+				mem_reg_write = 0;
+			end
+			default: begin
+				mem_addr = 64'h2000;
+				mem_wr_data = 0;
+				mem_wr_en = 0;
+				mem_reg_write = 0;
+			end
+		endcase
+	end
+endmodule
+
+
+module memory(
+    input [63:0] addr_pc,
+    input clk,
+    input reset,
+    input write_en,
+    input [63:0] data_in,
+    input [63:0] addr_rw,
+    output reg [63:0] data_out,
+    output reg [31:0] inst_out
+);
+    reg [7:0] mem_array [0:524287];
+    integer idx;
+    always @(*) begin
+        inst_out[7:0] = mem_array[addr_pc];
+        inst_out[15:8] = mem_array[addr_pc+1];
+        inst_out[23:16] = mem_array[addr_pc+2];
+        inst_out[31:24] = mem_array[addr_pc+3];
+    end
+    always @(*) begin
+        data_out[7:0] = mem_array[addr_rw];
+        data_out[15:8] = mem_array[addr_rw+1];
+        data_out[23:16] = mem_array[addr_rw+2];
+        data_out[31:24] = mem_array[addr_rw+3];
+        data_out[39:32] = mem_array[addr_rw+4];
+        data_out[47:40] = mem_array[addr_rw+5];
+        data_out[55:48] = mem_array[addr_rw+6];
+        data_out[63:56] = mem_array[addr_rw+7];
+    end
+    always @(posedge clk or posedge reset) begin
+        if(reset) begin
+            for(idx = 0; idx < 524288; idx = idx + 1)
+                mem_array[idx] <= 8'b0;
+        end else if(write_en) begin
+            mem_array[addr_rw] <= data_in[7:0];
+            mem_array[addr_rw+1] <= data_in[15:8];
+            mem_array[addr_rw+2] <= data_in[23:16];
+            mem_array[addr_rw+3] <= data_in[31:24];
+            mem_array[addr_rw+4] <= data_in[39:32];
+            mem_array[addr_rw+5] <= data_in[47:40];
+            mem_array[addr_rw+6] <= data_in[55:48];
+            mem_array[addr_rw+7] <= data_in[63:56];
+        end
     end
 endmodule
 
-// Instruction Fetch Stage: connects PC to memory
-module instruction_fetch(
-    input clk,
-    input reset,
-    input mem_read,
-    output [31:0] instruction,
-    input [31:0] pc   // Provided by the program counter
+module reglitmux(
+    input [4:0] sel,
+    input [63:0] reg_val,
+    input [63:0] imm_val,
+    output reg [63:0] mux_out
 );
-    memory inst_mem(
-        .clk(clk),
-        .mem_read(mem_read),
-        .mem_write(1'b0),  // No writes during instruction fetch
-        .address(pc),
-        .write_data(32'd0),
-        .read_data(instruction)
-    );
+    always @(*) begin
+        case(sel)
+        5'b11001, 5'b11011, 5'b00101, 5'b00111, 5'b10010: mux_out = imm_val;
+   default: mux_out = reg_val;
+     endcase
+    end
 endmodule
 
-
-// Top-Level Module: tinker_core
 module tinker_core(
     input clk,
     input reset
 );
-    // Program Counter 
     wire [31:0] pc;
-    // For now, no branch instructions are implemented.
     wire branch = 1'b0;
     wire [31:0] branch_address = 32'd0;
     
@@ -287,21 +385,19 @@ module tinker_core(
         .pc(pc)
     );
     
-    // Instruction Fetch 
     wire [31:0] instruction;
     instruction_fetch fetch_inst(
         .clk(clk),
         .reset(reset),
         .mem_read(1'b1),
         .instruction(instruction),
-        pc(pc))
-
-Instruction Decoder 
+        .pc(pc)
+    );
+    
     wire [4:0] opcode, rd, rs, rt;
     wire [11:0] literal;
     wire [3:0] alu_op;
     wire is_immediate, reg_write_enable, is_float;
-    
     instruction_decoder decoder_inst(
         .instruction(instruction),
         .opcode(opcode),
@@ -315,7 +411,6 @@ Instruction Decoder
         .is_float(is_float)
     );
     
-    // Register File 
     wire [63:0] rs_data, rt_data;
     register_file reg_file(
         .clk(clk),
@@ -328,9 +423,7 @@ Instruction Decoder
         .rt_data(rt_data)
     );
     
-    // ALU/FPU 
     wire [63:0] result;
-    // Select operand B: either sign-extended immediate or rt_data
     wire [63:0] operand_b;
     assign operand_b = is_immediate ? {{52{literal[11]}}, literal} : rt_data;
     
@@ -342,3 +435,4 @@ Instruction Decoder
         .result(result)
     );
 endmodule
+
