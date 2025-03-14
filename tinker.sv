@@ -6,7 +6,7 @@ module instruction_decoder(
     output reg [4:0]  rd,    
     output reg [4:0]  rs,    
     output reg [4:0]  rt,      
-    output reg [11:0] literal, 
+    output reg [63:0] literal,
     
     // 4-bit ALU opcode
     output reg [3:0]  alu_op,
@@ -35,8 +35,8 @@ module instruction_decoder(
         rd       = instruction[26:22];
         rs       = instruction[21:17];
         rt       = instruction[16:12];
-        literal  = instruction[11:0];
-        
+        literal = {{52{instruction[11]}}, instruction[11:0]}; // Sign-extend to 64 bits
+
         // Default control signals
         is_immediate     = 0;
         reg_write_enable = 1;
@@ -113,30 +113,32 @@ endmodule
 
 module register_file(
     input clk,
+    input reset, 
     input  [4:0] rs_addr,
     input  [4:0] rt_addr,
     input  [4:0] rd_addr,
     input  [63:0] write_data,
     input         write_enable,
     output [63:0] rs_data,
-    output [63:0] rt_data
+    output [63:0] rt_data,
+    output [63:0] stack_ptr 
 );
     reg [63:0] registers [0:31];
-    integer i;
     
-    initial begin
-        for (i = 0; i < 32; i = i + 1) begin
-            registers[i] = 64'd0;
-        end
-    end
-    
-    // Combinational reads
+    assign stack_ptr = registers[31];
     assign rs_data = registers[rs_addr];
     assign rt_data = registers[rt_addr];
     
-    always @(posedge clk) begin  
-        if (write_enable && (rd_addr != 5'd0))
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            // Initialize all registers to 0
+            for (int i = 0; i < 32; i++) begin
+                registers[i] <= 64'd0;
+            end
+            registers[31] <= 64'd524288; // Initialize stack pointer
+        end else if (write_enable && (rd_addr != 5'd0)) begin
             registers[rd_addr] <= write_data;
+        end
     end
 endmodule
 
@@ -306,52 +308,55 @@ module memoryHandler(
 		endcase
 	end
 endmodule
-
-
 module memory(
-    input [63:0] addr_pc,
-    input clk,
-    input reset,
-    input write_en,
-    input [63:0] data_in,
-    input [63:0] addr_rw,
-    output reg [63:0] data_out,
-    output reg [31:0] inst_out
+    input [63:0] address_pc,      
+    input clock,                  
+    input reset_signal,            
+    input write_enable,           
+    input [63:0] data_in,          
+    input [63:0] address_rw,       
+    output reg [63:0] data_out,    
+    output reg [31:0] inst_out     
 );
-    reg [7:0] bytes [0:524287];
-    integer idx;
-    always @(*) begin
-        inst_out[7:0] = bytes[addr_pc];
-        inst_out[15:8] = bytes[addr_pc+1];
-        inst_out[23:16] = bytes[addr_pc+2];
-        inst_out[31:24] = bytes[addr_pc+3];
-    end
-    always @(*) begin
-        data_out[7:0] = bytes[addr_rw];
-        data_out[15:8] = bytes[addr_rw+1];
-        data_out[23:16] = bytes[addr_rw+2];
-        data_out[31:24] = bytes[addr_rw+3];
-        data_out[39:32] = bytes[addr_rw+4];
-        data_out[47:40] = bytes[addr_rw+5];
-        data_out[55:48] = bytes[addr_rw+6];
-        data_out[63:56] = bytes[addr_rw+7];
-    end
-    always @(posedge clk or posedge reset) begin
-        if(reset) begin
-            for(idx = 0; idx < 524288; idx = idx + 1)
-                bytes[idx] <= 8'b0;
-        end else if(write_en) begin
-            bytes[addr_rw] <= data_in[7:0];
-            bytes[addr_rw+1] <= data_in[15:8];
-            bytes[addr_rw+2] <= data_in[23:16];
-            bytes[addr_rw+3] <= data_in[31:24];
-            bytes[addr_rw+4] <= data_in[39:32];
-            bytes[addr_rw+5] <= data_in[47:40];
-            bytes[addr_rw+6] <= data_in[55:48];
-            bytes[addr_rw+7] <= data_in[63:56];
+
+    reg [7:0] memory_bytes [0:524287];  
+    integer idx;                        
+
+    assign inst_out[7:0] = memory_bytes[address_pc];
+    assign inst_out[15:8] = memory_bytes[address_pc+1];
+    assign inst_out[23:16] = memory_bytes[address_pc+2];
+    assign inst_out[31:24] = memory_bytes[address_pc+3];
+
+    assign data_out[7:0] = memory_bytes[address_rw];
+    assign data_out[15:8] = memory_bytes[address_rw+1];
+    assign data_out[23:16] = memory_bytes[address_rw+2];
+    assign data_out[31:24] = memory_bytes[address_rw+3];
+    assign data_out[39:32] = memory_bytes[address_rw+4];
+    assign data_out[47:40] = memory_bytes[address_rw+5];
+    assign data_out[55:48] = memory_bytes[address_rw+6];
+    assign data_out[63:56] = memory_bytes[address_rw+7];
+
+    always @(posedge clock or posedge reset_signal) begin
+        if(reset_signal) begin
+            for (idx = 0; idx < 524288; idx = idx + 1) begin
+                memory_bytes[idx] <= 8'b0;
+            end
+        end else begin
+            if (write_enable) begin
+                memory_bytes[address_rw] <= data_in[7:0];
+                memory_bytes[address_rw+1] <= data_in[15:8];
+                memory_bytes[address_rw+2] <= data_in[23:16];
+                memory_bytes[address_rw+3] <= data_in[31:24];
+                memory_bytes[address_rw+4] <= data_in[39:32];
+                memory_bytes[address_rw+5] <= data_in[47:40];
+                memory_bytes[address_rw+6] <= data_in[55:48];
+                memory_bytes[address_rw+7] <= data_in[63:56];
+            end
         end
     end
+
 endmodule
+
 
 module reglitmux(
     input [4:0] sel,
@@ -374,27 +379,31 @@ module tinker_core(
     input reset
 );
     // Internal wires
-    wire [63:0] pc, new_pc, mem_data_out;
+    wire [63:0] pc, new_pc, mem_data_out, stack_ptr; 
     wire [31:0] instruction;
     wire [4:0] opcode, rd, rs, rt;
-    wire [11:0] literal;
+    wire [63:0] literal; 
     wire [3:0] alu_op;
     wire is_immediate, reg_write_enable, is_float;
     wire [63:0] rs_data, rt_data, alu_result, operand_b;
     wire [63:0] mem_addr, mem_wr_data;
     wire mem_wr_en, mem_reg_write;
+    wire [63:0] write_data = mem_reg_write ? mem_data_out : alu_result;
+    wire write_enable = reg_write_enable || mem_reg_write;
+    wire [63:0] rd_ext = {59'd0, rd};
 
     // Instantiate Memory
-    memory mem_inst(
-        .addr_pc(pc),
-        .clk(clk),
-        .reset(reset),
-        .write_en(mem_wr_en),
+    memory memory_inst(
+        .address_pc(pc),
+        .clock(clk),
+        .reset_signal(reset),
+        .write_enable(mem_wr_en),
         .data_in(mem_wr_data),
-        .addr_rw(mem_addr),
+        .address_rw(mem_addr),
         .data_out(mem_data_out),
         .inst_out(instruction)
     );
+
 
     // Fetch Unit
     fetch fetch_inst(
@@ -405,17 +414,17 @@ module tinker_core(
         .pc_out(pc)
     );
 
-    // Control Unit
-    control control_inst(
-        .op(opcode),
-        .rd(rd),
-        .rs(rs_data),
-        .rt(rt_data),
-        .lit(literal),
-        .inputPc(pc),
-        .memData(mem_data_out),
-        .pc(new_pc)
-    );
+control control_inst(
+    .op(opcode),
+    .rd(rd_ext),  // Use the extended signal
+    .rs(rs_data),
+    .rt(rt_data),
+    .lit(literal),
+    .inputPc(pc),
+    .memData(mem_data_out),
+    .pc(new_pc)
+);
+
 
     // Instruction Decoder
     instruction_decoder decoder_inst(
@@ -432,16 +441,18 @@ module tinker_core(
     );
 
     // Register File
-    register_file reg_file(
-        .clk(clk),
-        .rs_addr(rs),
-        .rt_addr(rt),
-        .rd_addr(rd),
-        .write_data(alu_result),
-        .write_enable(reg_write_enable),
-        .rs_data(rs_data),
-        .rt_data(rt_data)
-    );
+register_file reg_file(
+    .clk(clk),
+    .reset(reset),
+    .rs_addr(rs),
+    .rt_addr(rt),
+    .rd_addr(rd),
+    .write_data(write_data),
+    .write_enable(write_enable),
+    .stack_ptr(stack_ptr), // Added comma
+    .rs_data(rs_data),
+    .rt_data(rt_data)
+);
 
     // ALU Operand Mux
     assign operand_b = is_immediate ? {{52{literal[11]}}, literal} : rt_data;
@@ -458,16 +469,16 @@ module tinker_core(
     // Memory Handler
     memoryHandler mem_handler(
         .opcode(opcode),
-        .rd(rd),
+        .rd(rd_ext),   // (or use rd_ext if you choose Option A above)
         .rs(rs_data),
-        .rt(rt_data),
         .lit(literal),
         .pc(pc),
-        .r31(reg_file.registers[31]), // Stack pointer (r31)
+        .r31(stack_ptr),
         .mem_addr(mem_addr),
         .mem_wr_data(mem_wr_data),
         .mem_wr_en(mem_wr_en),
         .mem_reg_write(mem_reg_write)
     );
+
 
 endmodule
