@@ -308,6 +308,7 @@ module memoryHandler(
 		endcase
 	end
 endmodule
+
 module memory(
     input [63:0] address_pc,      
     input clock,                  
@@ -318,45 +319,40 @@ module memory(
     output reg [63:0] data_out,    
     output reg [31:0] inst_out     
 );
+    reg [7:0] bytes [0:524287];  
+    integer idx;
 
-    reg [7:0] memory_bytes [0:524287];  
-    integer idx;                        
+    assign inst_out[7:0] = bytes[address_pc];
+    assign inst_out[15:8] = bytes[address_pc+1];
+    assign inst_out[23:16] = bytes[address_pc+2];
+    assign inst_out[31:24] = bytes[address_pc+3];
 
-    assign inst_out[7:0] = memory_bytes[address_pc];
-    assign inst_out[15:8] = memory_bytes[address_pc+1];
-    assign inst_out[23:16] = memory_bytes[address_pc+2];
-    assign inst_out[31:24] = memory_bytes[address_pc+3];
-
-    assign data_out[7:0] = memory_bytes[address_rw];
-    assign data_out[15:8] = memory_bytes[address_rw+1];
-    assign data_out[23:16] = memory_bytes[address_rw+2];
-    assign data_out[31:24] = memory_bytes[address_rw+3];
-    assign data_out[39:32] = memory_bytes[address_rw+4];
-    assign data_out[47:40] = memory_bytes[address_rw+5];
-    assign data_out[55:48] = memory_bytes[address_rw+6];
-    assign data_out[63:56] = memory_bytes[address_rw+7];
+    assign data_out[7:0] = bytes[address_rw];
+    assign data_out[15:8] = bytes[address_rw+1];
+    assign data_out[23:16] = bytes[address_rw+2];
+    assign data_out[31:24] = bytes[address_rw+3];
+    assign data_out[39:32] = bytes[address_rw+4];
+    assign data_out[47:40] = bytes[address_rw+5];
+    assign data_out[55:48] = bytes[address_rw+6];
+    assign data_out[63:56] = bytes[address_rw+7];
 
     always @(posedge clock or posedge reset_signal) begin
         if(reset_signal) begin
             for (idx = 0; idx < 524288; idx = idx + 1) begin
-                memory_bytes[idx] <= 8'b0;
+                bytes[idx] <= 8'b0;
             end
-        end else begin
-            if (write_enable) begin
-                memory_bytes[address_rw] <= data_in[7:0];
-                memory_bytes[address_rw+1] <= data_in[15:8];
-                memory_bytes[address_rw+2] <= data_in[23:16];
-                memory_bytes[address_rw+3] <= data_in[31:24];
-                memory_bytes[address_rw+4] <= data_in[39:32];
-                memory_bytes[address_rw+5] <= data_in[47:40];
-                memory_bytes[address_rw+6] <= data_in[55:48];
-                memory_bytes[address_rw+7] <= data_in[63:56];
-            end
+        end else if (write_enable) begin
+            bytes[address_rw] <= data_in[7:0];
+            bytes[address_rw+1] <= data_in[15:8];
+            bytes[address_rw+2] <= data_in[23:16];
+            bytes[address_rw+3] <= data_in[31:24];
+            bytes[address_rw+4] <= data_in[39:32];
+            bytes[address_rw+5] <= data_in[47:40];
+            bytes[address_rw+6] <= data_in[55:48];
+            bytes[address_rw+7] <= data_in[63:56];
         end
     end
-
 endmodule
-
 
 module reglitmux(
     input [4:0] sel,
