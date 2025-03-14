@@ -389,7 +389,7 @@ module tinker_core(
     wire [63:0] rd_ext = {59'd0, rd};
 
     // Instantiate Memory
-    memory memory_inst(
+    memory memory(
         .address_pc(pc),
         .clock(clk),
         .reset_signal(reset),
