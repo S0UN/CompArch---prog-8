@@ -340,9 +340,9 @@ module tinker_core(
 
 control control_inst(
     .op(opcode),
-    .rd(rd_ext),  // Use the extended signal
-    .rs(rs_data),
-    .rt(rt_data),
+    .rd(rs_data),         
+    .rs(rs_data),          
+    .rt(rt_data),      
     .lit(literal),
     .inputPc(pc),
     .memData(mem_data_out),
