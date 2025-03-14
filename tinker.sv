@@ -340,7 +340,7 @@ module tinker_core(
 
 control control_inst(
     .op(opcode),
-    .rd(rs_data),         
+    .rd(rd_data),         
     .rs(rs_data),          
     .rt(rt_data),      
     .lit(literal),
