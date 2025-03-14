@@ -31,7 +31,7 @@ module instruction_decoder(
 
     always @(*) begin
         // Extract fields from instruction
-        opcode   = instruction[31:27];
+        opcode = instruction[31:27];
         rd       = instruction[26:22];
         rs       = instruction[21:17];
         rt       = instruction[16:12];
@@ -68,12 +68,14 @@ module instruction_decoder(
             5'b00100: alu_op = ALU_SHR;  // shftr (0x4)
             5'b00101: begin             // shftri (0x5)
                 alu_op       = ALU_SHR;
+                rt = 5'b0;
                 is_immediate = 1;
             end
             5'b00110: alu_op = ALU_SHL;  // shftl (0x6)
             5'b00111: begin             // shftli (0x7)
                 alu_op       = ALU_SHL;
                 is_immediate = 1;
+                rt = 5'b0; 
             end
             
             // Data Movement (0x11..0x12)
@@ -144,88 +146,75 @@ endmodule
 
 module control(
     input [4:0] op,
-	input [63:0] rd,
-	input [63:0] rs,
-	input [63:0] rt,
-	input [63:0] lit,
-	input [63:0] inputPc,
-	input [63:0] memData,
-	output reg [63:0] pc
+    input [63:0] rd,
+    input [63:0] rs,
+    input [63:0] rt,
+    input [63:0] lit,
+    input [63:0] inputPc,
+    input [63:0] memData,
+    output reg [63:0] pc
 );
-	 localparam BR = 5'b01000;
-	 localparam BRR_RD = 5'b01001;
-	 localparam BRR_L = 5'b01010;
-	 localparam BRNZ = 5'b01011;
-	 localparam CALL = 5'b01100;
-	 localparam RET = 5'b01101;
-	 localparam BRGT = 5'b01110;
-	 always @(*) begin
-	  case(op)
-	   BR: pc = rd;
-	   BRR_RD: pc = inputPc + rd;
-	   BRR_L: pc = inputPc + $signed(lit);
-	   BRNZ: pc = (rs != 0) ? rd : inputPc + 4;
-	   CALL: pc = rd;
-	   RET: pc = memData;
-	   BRGT: pc = (rs > rt) ? rd : inputPc + 4;
-	   default: pc = inputPc + 4;
-	  endcase
-	 end
+    always @(*) begin
+        case(op)
+            5'b01000: pc = rd;                 // br
+            5'b01001: pc = inputPc + rd;       // brr rd
+            5'b01010: pc = inputPc + $signed(lit); // brr L
+            5'b01011: pc = (rs != 0) ? rd : inputPc + 4; // brnz
+            5'b01100: pc = rd;                 // call
+            5'b01101: pc = memData;            // ret
+            5'b01110: pc = (rs > rt) ? rd : inputPc + 4; // brgt
+            default:   pc = inputPc + 4;       // normal flow
+        endcase
+    end
 endmodule
-
-
-// 3) ALU / FPU Combined
-// 4-bit op codes for integer arithmetic, logic, shift, etc.
 module alu_fpu(
     input  [63:0] a,
     input  [63:0] b,
-    input  [3:0]  op,
+    input  [3:0]  op,       // Changed to 5-bit opcode
     input         is_float,
     output reg [63:0] result
 );
     real float_a, float_b, float_res;
-    
-    // 4-bit ALU codes
-    localparam ALU_ADD = 4'b0000;
-    localparam ALU_SUB = 4'b0001;
-    localparam ALU_MUL = 4'b0010;
-    localparam ALU_DIV = 4'b0011;
-    localparam ALU_SHR = 4'b0100; // Shift Right
-    localparam ALU_SHL = 4'b0101; // Shift Left
-    localparam ALU_AND = 4'b0110;
-    localparam ALU_OR  = 4'b0111;
-    localparam ALU_XOR = 4'b1000;
-    localparam ALU_NOT = 4'b1001;
 
     always @(*) begin
         if (is_float) begin
-            // Floating-Point path
+            // Floating-point operations remain same
             float_a = $bitstoreal(a);
             float_b = $bitstoreal(b);
-            
-            case (op)
-                ALU_ADD: float_res = float_a + float_b;
-                ALU_SUB: float_res = float_a - float_b;
-                ALU_MUL: float_res = float_a * float_b;
-                ALU_DIV: float_res = float_a / float_b;
+            case(op[3:0])  // Use lower 4 bits for float ops
+                4'b0000: float_res = float_a + float_b;
+                4'b0001: float_res = float_a - float_b;
+                4'b0010: float_res = float_a * float_b;
+                4'b0011: float_res = float_a / float_b;
                 default: float_res = 0.0;
             endcase
-            
             result = $realtobits(float_res);
         end
         else begin
-            // Integer / Logic path
-            case (op)
-                ALU_ADD: result = a + b;
-                ALU_SUB: result = a - b;
-                ALU_MUL: result = a * b;
-                ALU_DIV: result = (b != 0) ? (a / b) : 64'd0; 
-                ALU_SHR: result = a >> b[5:0];
-                ALU_SHL: result = a << b[5:0];
-                ALU_AND: result = a & b;
-                ALU_OR : result = a | b;
-                ALU_XOR: result = a ^ b;
-                ALU_NOT: result = ~a;
+            // Enhanced integer path with full opcode
+            case(op)
+                // Immediate instructions
+                5'b11001: result = a + b;  // addi
+                5'b11011: result = a - b;  // subi
+                5'b00101: result = a >> b[5:0]; // shftri
+                5'b00111: result = a << b[5:0]; // shftli
+                
+                // Regular ALU ops
+                5'b11000: result = a + b;  // add
+                5'b11010: result = a - b;  // sub
+                5'b11100: result = a * b;  // mul
+                5'b11101: result = (b != 0) ? (a / b) : 0; // div
+                5'b00000: result = a & b;  // and
+                5'b00001: result = a | b;  // or
+                5'b00010: result = a ^ b;  // xor
+                5'b00011: result = ~a;     // not
+                5'b00100: result = a >> b[5:0]; // shftr
+                5'b00110: result = a << b[5:0]; // shftl
+                
+                // Data movement
+                5'b10001: result = a;      // mov rd, rs
+                5'b10010: result = {52'b0, b[11:0]}; // mov rd, L
+                
                 default: result = 64'd0;
             endcase
         end
