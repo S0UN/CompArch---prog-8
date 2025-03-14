@@ -57,8 +57,10 @@ module register_file(
     input  [4:0] rs_addr,
     input  [4:0] rt_addr,
     input  [4:0] rd_addr,
+    
     input  [63:0] write_data,
     input         write_enable,
+    output [63:0] rd_data,
     output [63:0] rs_data,
     output [63:0] rt_data,
     output [63:0] stack_ptr 
@@ -68,6 +70,7 @@ module register_file(
     assign stack_ptr = registers[31];
     assign rs_data = registers[rs_addr];
     assign rt_data = registers[rt_addr];
+    assign rd_data = registers[rd_addr]; 
     
     always @(posedge clk or posedge reset) begin
         if (reset) begin
