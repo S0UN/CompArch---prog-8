@@ -71,7 +71,7 @@ module register_file(
     assign rs_data = registers[rs_addr];
     assign rt_data = registers[rt_addr];
     assign rd_data = registers[rd_addr]; 
-    
+
     always @(posedge clk or posedge reset) begin
         if (reset) begin
             // Initialize all registers to 0
@@ -377,6 +377,7 @@ register_file reg_file(
     .write_data(write_data),
     .write_enable(write_enable),
     .stack_ptr(stack_ptr), // Added comma
+    .rd_data(rd_data),
     .rs_data(rs_data),
     .rt_data(rt_data)
 );
