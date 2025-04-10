@@ -1,9 +1,7 @@
 // Top-Level Module
 module tinker_core (
     input logic clk,
-    input logic reset,
-    output logic [7:0] memory_bytes [0:524287],  // Expose memory for testbench
-    output logic [63:0] reg_bank [0:31]          // Expose registers for testbench
+    input logic reset
 );
     logic [4:0] dest_reg, src_reg1, src_reg2, opcode;
     logic [31:0] instr_word;
@@ -20,7 +18,7 @@ module tinker_core (
         .pc_out(pc_current)
     );
 
-    memory_unit mem (
+    memory_unit memory (  // Renamed to match 'core.memory'
         .program_counter(pc_current),
         .clk(clk),
         .reset(reset),
@@ -28,8 +26,7 @@ module tinker_core (
         .data_in(mem_data_in),
         .address(mem_addr),
         .data_out(mem_data_out),
-        .instruction(instr_word),
-        .mem_bytes(memory_bytes)  // Connect to top-level output
+        .instruction(instr_word)
     );
 
     control_unit ctrl (
@@ -65,7 +62,7 @@ module tinker_core (
         .opcode(opcode)
     );
 
-    reg_file_bank regs (
+    reg_file_bank reg_file (  // Renamed to match 'core.reg_file'
         .clk(clk),
         .reset(reset),
         .mem_write_en(write_from_mem),
@@ -77,8 +74,7 @@ module tinker_core (
         .data1(src_val1),
         .data2(src_val2),
         .data_dest(dest_val),
-        .stack(stack_ptr),
-        .registers(reg_bank)  // Connect to top-level output
+        .stack(stack_ptr)
     );
 
     reg_lit_mux mux (
@@ -181,28 +177,26 @@ module reg_file_bank (
     output logic [63:0] data1,
     output logic [63:0] data2,
     output logic [63:0] data_dest,
-    output logic [63:0] stack,
-    output logic [63:0] registers [0:31]
+    output logic [63:0] stack
 );
-    logic [63:0] reg_array [0:31];
+    logic [63:0] registers [0:31];  // Named to match 'core.reg_file.registers'
     logic write_en;
     integer i;
 
     assign write_en = mem_write_en | alu_write_en;
-    assign data1 = reg_array[addr1];
-    assign data2 = reg_array[addr2];
-    assign data_dest = reg_array[write_addr];
-    assign stack = reg_array[31];
-    assign registers = reg_array;
+    assign data1 = registers[addr1];
+    assign data2 = registers[addr2];
+    assign data_dest = registers[write_addr];
+    assign stack = registers[31];
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             for (i = 0; i < 31; i = i + 1)
-                reg_array[i] <= 64'h0;
-            reg_array[31] <= 64'd524288;
+                registers[i] <= 64'h0;
+            registers[31] <= 64'd524288;
         end
         else if (write_en)
-            reg_array[write_addr] <= write_data;
+            registers[write_addr] <= write_data;
     end
 endmodule
 
@@ -311,11 +305,10 @@ module memory_unit (
     input logic [63:0] data_in,
     input logic [63:0] address,
     output logic [63:0] data_out,
-    output logic [31:0] instruction,
-    output logic [7:0] mem_bytes [0:524287]
+    output logic [31:0] instruction
 );
-    logic [7:0] bytes [0:524287];
-    integer j;
+    logic [7:0] bytes [0:524287];  // Named to match 'core.memory.bytes'
+    integer j, k;
 
     assign instruction[31:24] = bytes[program_counter+3];
     assign instruction[23:16] = bytes[program_counter+2];
@@ -329,7 +322,6 @@ module memory_unit (
     assign data_out[23:16] = bytes[address+2];
     assign data_out[15:8]  = bytes[address+1];
     assign data_out[7:0]   = bytes[address];
-    assign mem_bytes = bytes;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -337,14 +329,8 @@ module memory_unit (
                 bytes[j] <= 8'h0;
         end
         else if (write_en) begin
-            bytes[address]   <= data_in[7:0];
-            bytes[address+1] <= data_in[15:8];
-            bytes[address+2] <= data_in[23:16];
-            bytes[address+3] <= data_in[31:24];
-            bytes[address+4] <= data_in[39:32];
-            bytes[address+5] <= data_in[47:40];
-            bytes[address+6] <= data_in[55:48];
-            bytes[address+7] <= data_in[63:56];
+            for (k = 0; k < 8; k = k + 1)
+                bytes[address + k] <= data_in[8*k +: 8];
         end
     end
 endmodule
