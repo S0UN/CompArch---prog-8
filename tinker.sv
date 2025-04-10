@@ -25,45 +25,37 @@ module memory_unit (
     input logic [63:0] wr_data,
     input logic [63:0] mem_addr,
     output logic [63:0] rd_data,
-    output logic [31:0] inst_word,
-    inout logic [7:0] bytes [0:524287] // Exposed for testbench access
+    output logic [31:0] inst_word
 );
-    logic [7:0] mem_bytes [0:524287];
+    logic [7:0] bytes [0:524287]; // Renamed to match testbench expectation
     integer j;
-    assign inst_word[7:0] = mem_bytes[curr_pc];
-    assign inst_word[15:8] = mem_bytes[curr_pc+1];
-    assign inst_word[23:16] = mem_bytes[curr_pc+2];
-    assign inst_word[31:24] = mem_bytes[curr_pc+3];
-    assign rd_data[7:0] = mem_bytes[mem_addr];
-    assign rd_data[15:8] = mem_bytes[mem_addr+1];
-    assign rd_data[23:16] = mem_bytes[mem_addr+2];
-    assign rd_data[31:24] = mem_bytes[mem_addr+3];
-    assign rd_data[39:32] = mem_bytes[mem_addr+4];
-    assign rd_data[47:40] = mem_bytes[mem_addr+5];
-    assign rd_data[55:48] = mem_bytes[mem_addr+6];
-    assign rd_data[63:56] = mem_bytes[mem_addr+7];
+    assign inst_word[7:0] = bytes[curr_pc];
+    assign inst_word[15:8] = bytes[curr_pc+1];
+    assign inst_word[23:16] = bytes[curr_pc+2];
+    assign inst_word[31:24] = bytes[curr_pc+3];
+    assign rd_data[7:0] = bytes[mem_addr];
+    assign rd_data[15:8] = bytes[mem_addr+1];
+    assign rd_data[23:16] = bytes[mem_addr+2];
+    assign rd_data[31:24] = bytes[mem_addr+3];
+    assign rd_data[39:32] = bytes[mem_addr+4];
+    assign rd_data[47:40] = bytes[mem_addr+5];
+    assign rd_data[55:48] = bytes[mem_addr+6];
+    assign rd_data[63:56] = bytes[mem_addr+7];
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             for (j = 0; j < 524288; j = j + 1)
-                mem_bytes[j] <= 8'b0;
+                bytes[j] <= 8'b0;
         end else if (flag) begin
-            mem_bytes[mem_addr] <= wr_data[7:0];
-            mem_bytes[mem_addr+1] <= wr_data[15:8];
-            mem_bytes[mem_addr+2] <= wr_data[23:16];
-            mem_bytes[mem_addr+3] <= wr_data[31:24];
-            mem_bytes[mem_addr+4] <= wr_data[39:32];
-            mem_bytes[mem_addr+5] <= wr_data[47:40];
-            mem_bytes[mem_addr+6] <= wr_data[55:48];
-            mem_bytes[mem_addr+7] <= wr_data[63:56];
+            bytes[mem_addr] <= wr_data[7:0];
+            bytes[mem_addr+1] <= wr_data[15:8];
+            bytes[mem_addr+2] <= wr_data[23:16];
+            bytes[mem_addr+3] <= wr_data[31:24];
+            bytes[mem_addr+4] <= wr_data[39:32];
+            bytes[mem_addr+5] <= wr_data[47:40];
+            bytes[mem_addr+6] <= wr_data[55:48];
+            bytes[mem_addr+7] <= wr_data[63:56];
         end
     end
-    // Connect internal array to external port
-    generate
-        genvar i;
-        for (i = 0; i < 524288; i = i + 1) begin : mem_connect
-            assign bytes[i] = mem_bytes[i];
-        end
-    endgenerate
 endmodule
 
 // Control Unit
@@ -178,33 +170,25 @@ module reg_file_bank (
     output logic [63:0] out1,
     output logic [63:0] out2,
     output logic [63:0] out3,
-    output logic [63:0] stack_ptr,
-    inout logic [63:0] registers [0:31] // Exposed for testbench access
+    output logic [63:0] stack_ptr
 );
-    logic [63:0] reg_array [0:31];
+    logic [63:0] registers [0:31]; // Renamed to match testbench expectation
     logic write_en;
     integer k;
     assign write_en = mem_wr | reg_wr;
-    assign out1 = reg_array[raddr1];
-    assign out2 = reg_array[raddr2];
-    assign out3 = reg_array[wr_addr];
-    assign stack_ptr = reg_array[31];
+    assign out1 = registers[raddr1];
+    assign out2 = registers[raddr2];
+    assign out3 = registers[wr_addr];
+    assign stack_ptr = registers[31];
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             for (k = 0; k < 31; k = k + 1)
-                reg_array[k] <= 64'b0;
-            reg_array[31] <= 64'd524288;
+                registers[k] <= 64'b0;
+            registers[31] <= 64'd524288;
         end else if (write_en) begin
-            reg_array[wr_addr] <= wr_data;
+            registers[wr_addr] <= wr_data;
         end
     end
-    // Connect internal array to external port
-    generate
-        genvar i;
-        for (i = 0; i < 32; i = i + 1) begin : reg_connect
-            assign registers[i] = reg_array[i];
-        end
-    endgenerate
 endmodule
 
 // Register/Literal Mux
@@ -283,9 +267,7 @@ endmodule
 // Top-Level Module
 module tinker_core (
     input logic clk,
-    input logic rst,
-    inout logic [7:0] memory_bytes [0:524287],  // Exposed for testbench
-    inout logic [63:0] reg_file_registers [0:31] // Exposed for testbench
+    input logic rst
 );
     logic [4:0] dest, src1, src2, opCode;
     logic [31:0] inst_word;
@@ -310,8 +292,7 @@ module tinker_core (
         .wr_data(mem_wr_data),
         .mem_addr(mem_rw_addr),
         .rd_data(mem_out),
-        .inst_word(inst_word),
-        .bytes(memory_bytes)
+        .inst_word(inst_word)
     );
 
     control_unit control_inst (
@@ -359,8 +340,7 @@ module tinker_core (
         .out1(src_val1),
         .out2(src_val2),
         .out3(dest_val),
-        .stack_ptr(stack_ptr),
-        .registers(reg_file_registers)
+        .stack_ptr(stack_ptr)
     );
 
     reg_lit_mux mux_inst (
