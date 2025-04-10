@@ -1,15 +1,15 @@
 // Fetch Unit
 module fetch_unit (
     input logic clk,
-    input logic rst,
+    input logic reset,
     input logic [63:0] r31,
     input logic [63:0] next_pc_in,
     output logic [63:0] curr_pc
 );
     logic [63:0] prog_counter;
     assign curr_pc = prog_counter;
-    always @(posedge clk or posedge rst) begin
-        if (rst)
+    always @(posedge clk or posedge reset) begin
+        if (reset)
             prog_counter <= 64'h2000;
         else
             prog_counter <= next_pc_in;
@@ -20,14 +20,14 @@ endmodule
 module memory_unit (
     input logic [63:0] curr_pc,
     input logic clk,
-    input logic rst,
+    input logic reset,
     input logic flag,
     input logic [63:0] wr_data,
     input logic [63:0] mem_addr,
     output logic [63:0] rd_data,
     output logic [31:0] inst_word
 );
-    logic [7:0] bytes [0:524287]; // Renamed to match testbench expectation
+    logic [7:0] bytes [0:524287];
     integer j;
     assign inst_word[7:0] = bytes[curr_pc];
     assign inst_word[15:8] = bytes[curr_pc+1];
@@ -41,8 +41,8 @@ module memory_unit (
     assign rd_data[47:40] = bytes[mem_addr+5];
     assign rd_data[55:48] = bytes[mem_addr+6];
     assign rd_data[63:56] = bytes[mem_addr+7];
-    always @(posedge clk or posedge rst) begin
-        if (rst) begin
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
             for (j = 0; j < 524288; j = j + 1)
                 bytes[j] <= 8'b0;
         end else if (flag) begin
@@ -163,7 +163,7 @@ module reg_file_bank (
     input logic [4:0] raddr1,
     input logic [4:0] raddr2,
     input logic [4:0] wr_addr,
-    input logic rst,
+    input logic reset,
     input logic mem_wr,
     input logic reg_wr,
     input logic clk,
@@ -172,7 +172,7 @@ module reg_file_bank (
     output logic [63:0] out3,
     output logic [63:0] stack_ptr
 );
-    logic [63:0] registers [0:31]; // Renamed to match testbench expectation
+    logic [63:0] registers [0:31];
     logic write_en;
     integer k;
     assign write_en = mem_wr | reg_wr;
@@ -180,8 +180,8 @@ module reg_file_bank (
     assign out2 = registers[raddr2];
     assign out3 = registers[wr_addr];
     assign stack_ptr = registers[31];
-    always @(posedge clk or posedge rst) begin
-        if (rst) begin
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
             for (k = 0; k < 31; k = k + 1)
                 registers[k] <= 64'b0;
             registers[31] <= 64'd524288;
@@ -267,7 +267,7 @@ endmodule
 // Top-Level Module
 module tinker_core (
     input logic clk,
-    input logic rst
+    input logic reset
 );
     logic [4:0] dest, src1, src2, opCode;
     logic [31:0] inst_word;
@@ -278,7 +278,7 @@ module tinker_core (
 
     fetch_unit fetch_inst (
         .clk(clk),
-        .rst(rst),
+        .reset(reset),
         .r31(stack_ptr),
         .next_pc_in(nextPC),
         .curr_pc(currPC)
@@ -287,7 +287,7 @@ module tinker_core (
     memory_unit memory (
         .curr_pc(currPC),
         .clk(clk),
-        .rst(rst),
+        .reset(reset),
         .flag(mem_wr_flag),
         .wr_data(mem_wr_data),
         .mem_addr(mem_rw_addr),
@@ -330,7 +330,7 @@ module tinker_core (
 
     reg_file_bank reg_file (
         .clk(clk),
-        .rst(rst),
+        .reset(reset),
         .mem_wr(reg_wr_mem),
         .reg_wr(reg_wr_alu),
         .wr_data(reg_wr_mem ? mem_out : alu_out),
