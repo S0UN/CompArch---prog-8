@@ -1,15 +1,15 @@
 // Fetch Unit
 module fetch_unit (
-    input logic clock,
-    input logic reset,
+    input logic clk,
+    input logic rst,
     input logic [63:0] r31,
     input logic [63:0] next_pc_in,
     output logic [63:0] curr_pc
 );
     logic [63:0] prog_counter;
     assign curr_pc = prog_counter;
-    always @(posedge clock or posedge reset) begin
-        if (reset)
+    always @(posedge clk or posedge rst) begin
+        if (rst)
             prog_counter <= 64'h2000;
         else
             prog_counter <= next_pc_in;
@@ -19,13 +19,14 @@ endmodule
 // Memory Unit
 module memory_unit (
     input logic [63:0] curr_pc,
-    input logic clock,
-    input logic reset,
+    input logic clk,
+    input logic rst,
     input logic flag,
     input logic [63:0] wr_data,
     input logic [63:0] mem_addr,
     output logic [63:0] rd_data,
-    output logic [31:0] inst_word
+    output logic [31:0] inst_word,
+    inout logic [7:0] bytes [0:524287] // Exposed for testbench access
 );
     logic [7:0] mem_bytes [0:524287];
     integer j;
@@ -41,8 +42,8 @@ module memory_unit (
     assign rd_data[47:40] = mem_bytes[mem_addr+5];
     assign rd_data[55:48] = mem_bytes[mem_addr+6];
     assign rd_data[63:56] = mem_bytes[mem_addr+7];
-    always @(posedge clock or posedge reset) begin
-        if (reset) begin
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
             for (j = 0; j < 524288; j = j + 1)
                 mem_bytes[j] <= 8'b0;
         end else if (flag) begin
@@ -56,6 +57,13 @@ module memory_unit (
             mem_bytes[mem_addr+7] <= wr_data[63:56];
         end
     end
+    // Connect internal array to external port
+    generate
+        genvar i;
+        for (i = 0; i < 524288; i = i + 1) begin : mem_connect
+            assign bytes[i] = mem_bytes[i];
+        end
+    endgenerate
 endmodule
 
 // Control Unit
@@ -163,32 +171,40 @@ module reg_file_bank (
     input logic [4:0] raddr1,
     input logic [4:0] raddr2,
     input logic [4:0] wr_addr,
-    input logic reset,
+    input logic rst,
     input logic mem_wr,
     input logic reg_wr,
-    input logic clock,
+    input logic clk,
     output logic [63:0] out1,
     output logic [63:0] out2,
     output logic [63:0] out3,
-    output logic [63:0] stack_ptr
+    output logic [63:0] stack_ptr,
+    inout logic [63:0] registers [0:31] // Exposed for testbench access
 );
-    logic [63:0] registers [0:31];
+    logic [63:0] reg_array [0:31];
     logic write_en;
     integer k;
     assign write_en = mem_wr | reg_wr;
-    assign out1 = registers[raddr1];
-    assign out2 = registers[raddr2];
-    assign out3 = registers[wr_addr];
-    assign stack_ptr = registers[31];
-    always @(posedge clock or posedge reset) begin
-        if (reset) begin
+    assign out1 = reg_array[raddr1];
+    assign out2 = reg_array[raddr2];
+    assign out3 = reg_array[wr_addr];
+    assign stack_ptr = reg_array[31];
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
             for (k = 0; k < 31; k = k + 1)
-                registers[k] <= 64'b0;
-            registers[31] <= 64'd524288;
+                reg_array[k] <= 64'b0;
+            reg_array[31] <= 64'd524288;
         end else if (write_en) begin
-            registers[wr_addr] <= wr_data;
+            reg_array[wr_addr] <= wr_data;
         end
     end
+    // Connect internal array to external port
+    generate
+        genvar i;
+        for (i = 0; i < 32; i = i + 1) begin : reg_connect
+            assign registers[i] = reg_array[i];
+        end
+    endgenerate
 endmodule
 
 // Register/Literal Mux
@@ -266,8 +282,10 @@ endmodule
 
 // Top-Level Module
 module tinker_core (
-    input logic clock,
-    input logic reset
+    input logic clk,
+    input logic rst,
+    inout logic [7:0] memory_bytes [0:524287],  // Exposed for testbench
+    inout logic [63:0] reg_file_registers [0:31] // Exposed for testbench
 );
     logic [4:0] dest, src1, src2, opCode;
     logic [31:0] inst_word;
@@ -277,22 +295,23 @@ module tinker_core (
     logic mem_wr_flag, reg_wr_mem, reg_wr_alu;
 
     fetch_unit fetch_inst (
-        .clock(clock),
-        .reset(reset),
+        .clk(clk),
+        .rst(rst),
         .r31(stack_ptr),
         .next_pc_in(nextPC),
         .curr_pc(currPC)
     );
 
-    memory_unit memory_inst (
+    memory_unit memory (
         .curr_pc(currPC),
-        .clock(clock),
-        .reset(reset),
+        .clk(clk),
+        .rst(rst),
         .flag(mem_wr_flag),
         .wr_data(mem_wr_data),
         .mem_addr(mem_rw_addr),
         .rd_data(mem_out),
-        .inst_word(inst_word)
+        .inst_word(inst_word),
+        .bytes(memory_bytes)
     );
 
     control_unit control_inst (
@@ -328,19 +347,20 @@ module tinker_core (
         .op(opCode)
     );
 
-    reg_file_bank reg_file_inst (
-        .clock(clock),
-        .reset(reset),
+    reg_file_bank reg_file (
+        .clk(clk),
+        .rst(rst),
         .mem_wr(reg_wr_mem),
         .reg_wr(reg_wr_alu),
-        .wr_data(reg_wr_mem ? mem_out : alu_out), // Added mux for memory write-back
+        .wr_data(reg_wr_mem ? mem_out : alu_out),
         .raddr1(src1),
         .raddr2(src2),
         .wr_addr(dest),
         .out1(src_val1),
         .out2(src_val2),
         .out3(dest_val),
-        .stack_ptr(stack_ptr)
+        .stack_ptr(stack_ptr),
+        .registers(reg_file_registers)
     );
 
     reg_lit_mux mux_inst (
