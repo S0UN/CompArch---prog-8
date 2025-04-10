@@ -1,20 +1,18 @@
 module tinker_core (
-    input wire clock,
-    input wire rst
+    input clk,
+    input reset
 );
-    wire [63:0] programCounter, nextProgramCounter;
-    wire [31:0] currentInstruction;
-    wire [4:0] destReg, sourceReg1, sourceReg2, operationCode;
-    wire [63:0] immediateValue, regDestVal, regSrc1Val, regSrc2Val;
-    wire [63:0] aluOutput, memReadData, memWriteValue, memAccessAddr;
-    wire aluWriteEnable, memWriteEnable, memToRegWrite;
-    wire [63:0] secondOperand;
+    logic [4:0] rd, rs, rt, opcode;
+    logic [31:0] instruction;
+    logic [63:0] next_pc, pc;
+    logic [63:0] literal, rd_val, rs_val, rt_val, in2, data, stackPtr, memWriteData, rwAddress, memOutput;
+    logic memWriteFlag, regWriteMem, regWriteALU;
 
-    // Fetch Unit (matched to friend’s fetch)
-    module pcUpdater (
+    // Fetch Module
+    module fetch (
         input wire clk,
         input wire reset,
-        input wire [63:0] r31,        // Unused but kept for compatibility
+        input wire [63:0] r31,
         input wire [63:0] next_pc,
         output reg [63:0] pc
     );
@@ -28,8 +26,8 @@ module tinker_core (
         end
     endmodule
 
-    // Memory Module (matched to friend’s memory)
-    module storageUnit (
+    // Memory Module
+    module memory (
         input wire [63:0] pc,
         input wire clk,
         input wire reset,
@@ -48,7 +46,7 @@ module tinker_core (
         assign readData[7:0] = bytes[rwAddress];
         assign readData[15:8] = bytes[rwAddress+1];
         assign readData[23:16] = bytes[rwAddress+2];
-        assign readData[31:24]luğu = bytes[rwAddress+3];
+        assign readData[31:24] = bytes[rwAddress+3];
         assign readData[39:32] = bytes[rwAddress+4];
         assign readData[47:40] = bytes[rwAddress+5];
         assign readData[55:48] = bytes[rwAddress+6];
@@ -70,117 +68,8 @@ module tinker_core (
         end
     endmodule
 
-    // Instruction Parser (unchanged)
-    module insnParser (
-        input wire [31:0] insn,
-        output reg [4:0] opCode,
-        output reg [4:0] regD,
-        output reg [4:0] regS1,
-        output reg [4:0] regS2,
-        output reg [63:0] immVal
-    );
-        always @(*) begin
-            opCode = insn[31:27];
-            regD = insn[26:22];
-            regS1 = insn[21:17];
-            regS2 = insn[16:12];
-            immVal = {{52{insn[11]}}, insn[11:0]};
-            if (opCode == 5'h19 || opCode == 5'h1B || opCode == 5'h05 ||
-                opCode == 5'h07 || opCode == 5'h12)
-                regS1 = regD;
-        end
-    endmodule
-
-    // Register Bank (matched to friend’s registerFile)
-    module regBank (
-        input wire clk,
-        input wire reset,
-        input wire [63:0] data,
-        input wire [4:0] read1,
-        input wire [4:0] read2,
-        input wire [4:0] write,
-        input wire memFlag,
-        input wire regFlag,
-        output reg [63:0] output1,
-        output reg [63:0] output2,
-        output reg [63:0] output3,
-        output reg [63:0] stackPtr
-    );
-        reg [63:0] registers [0:31];
-        reg writeReg;
-        integer i;
-        assign writeReg = memFlag | regFlag;
-        assign output1 = registers[read1];
-        assign output2 = registers[read2];
-        assign output3 = registers[write];
-        assign stackPtr = registers[31];
-        always @(posedge clk or posedge reset) begin
-            if (reset) begin
-                for (i = 0; i < 31; i = i + 1)
-                    registers[i] <= 64'b0;
-                registers[31] <= 64'd524288;
-            end else if (writeReg) begin
-                registers[write] <= data;
-            end
-        end
-    endmodule
-
-    // ALU (matched to friend’s alu)
-    module computeUnit (
-        input wire [4:0] control,
-        input wire [63:0] input1,
-        input wire [63:0] input2,
-        output reg flag,
-        output reg [63:0] result
-    );
-        real r1, r2, rres;
-        assign r1 = $bitstoreal(input1);
-        assign r2 = $bitstoreal(input2);
-        always @(*) begin
-            flag = 1;
-            case (control)
-                5'b11000: result = input1 + input2;
-                5'b11001: result = input1 + input2;
-                5'b11010: result = input1 - input2;
-                5'b11011: result = input1 - input2;
-                5'b11100: result = input1 * input2;
-                5'b11101: result = input1 / input2;
-                5'b00000: result = input1 & input2;
-                5'b00001: result = input1 | input2;
-                5'b00010: result = input1 ^ input2;
-                5'b00011: result = ~input1;
-                5'b00100: result = input1 >> input2;
-                5'b00101: result = input1 >> input2;
-                5'b00110: result = input1 << input2;
-                5'b00111: result = input1 << input2;
-                5'b10001: result = input1;
-                5'b10010: result = {input1[63:12], input2[11:0]};
-                5'b10100: begin
-                    rres = r1 + r2;
-                    result = $realtobits(rres);
-                end
-                5'b10101: begin
-                    rres = r1 - r2;
-                    result = $realtobits(rres);
-                end
-                5'b10110: begin
-                    rres = r1 * r2;
-                    result = $realtobits(rres);
-                end
-                5'b10111: begin
-                    rres = r1 / r2;
-                    result = $realtobits(rres);
-                end
-                default: begin
-                    flag = 0;
-                    result = 64'b0;
-                end
-            endcase
-        end
-    endmodule
-
-    // Branch Control Unit (matched to friend’s control)
-    module branchController (
+    // Control Module
+    module control (
         input wire [4:0] op,
         input wire [63:0] rd,
         input wire [63:0] rs,
@@ -204,8 +93,8 @@ module tinker_core (
         end
     endmodule
 
-    // Memory Access Controller (matched to friend’s memoryHandler)
-    module memController (
+    // Memory Handler Module
+    module memoryHandler (
         input wire [4:0] opcode,
         input wire [63:0] rd,
         input wire [63:0] rs,
@@ -253,8 +142,67 @@ module tinker_core (
         end
     endmodule
 
-    // Operand Selector (matched to friend’s reglitmux)
-    module operandMux (
+    // Instruction Decoder Module
+    module instructionDecoder (
+        input wire [31:0] instructionLine,
+        output reg [63:0] literal,
+        output reg [4:0] rd,
+        output reg [4:0] rs,
+        output reg [4:0] rt,
+        output reg [4:0] opcode
+    );
+        always @(*) begin
+            opcode = instructionLine[31:27];
+            rd = instructionLine[26:22];
+            rs = instructionLine[21:17];
+            rt = instructionLine[16:12];
+            literal = {52'b0, instructionLine[11:0]};
+            case (opcode)
+                5'b11001: rs = rd; // addi
+                5'b11011: rs = rd; // subi
+                5'b00101: rs = rd; // shftri
+                5'b00111: rs = rd; // shftli
+                5'b10010: rs = rd; // mov $r_d, L
+            endcase
+        end
+    endmodule
+
+    // Register File Module
+    module registerFile (
+        input wire [63:0] data,
+        input wire [4:0] read1,
+        input wire [4:0] read2,
+        input wire [4:0] write,
+        input wire reset,
+        input wire memFlag,
+        input wire regFlag,
+        input wire clk,
+        output reg [63:0] output1,
+        output reg [63:0] output2,
+        output reg [63:0] output3,
+        output reg [63:0] stackPtr
+    );
+        reg [63:0] registers [0:31];
+        reg writeReg;
+        integer i;
+        assign writeReg = memFlag | regFlag;
+        assign output1 = registers[read1];
+        assign output2 = registers[read2];
+        assign output3 = registers[write];
+        assign stackPtr = registers[31];
+        always @(posedge clk or posedge reset) begin
+            if (reset) begin
+                for (i = 0; i < 31; i = i + 1)
+                    registers[i] <= 64'b0;
+                registers[31] <= 64'd524288;
+            end else if (writeReg) begin
+                registers[write] <= data;
+            end
+        end
+    endmodule
+
+    // Register/Literal Mux Module
+    module reglitmux (
         input wire [4:0] sel,
         input wire [63:0] reg1,
         input wire [63:0] lit,
@@ -272,87 +220,141 @@ module tinker_core (
         end
     endmodule
 
-    // Instantiate modules
-    pcUpdater pcUnit (
-        .clk(clock),
-        .reset(rst),
+    // ALU Module
+    module alu (
+        input wire [4:0] control,
+        input wire [63:0] input1,
+        input wire [63:0] input2,
+        output reg flag,
+        output reg [63:0] result
+    );
+        real r1, r2, rres;
+        assign r1 = $bitstoreal(input1);
+        assign r2 = $bitstoreal(input2);
+        always @(*) begin
+            flag = 1;
+            case (control)
+                5'b11000: result = input1 + input2;         // add
+                5'b11001: result = input1 + input2;         // addi
+                5'b11010: result = input1 - input2;         // sub
+                5'b11011: result = input1 - input2;         // subi
+                5'b11100: result = input1 * input2;         // mul
+                5'b11101: result = input1 / input2;         // div
+                5'b00000: result = input1 & input2;         // and
+                5'b00001: result = input1 | input2;         // or
+                5'b00010: result = input1 ^ input2;         // xor
+                5'b00011: result = ~input1;                 // not
+                5'b00100: result = input1 >> input2;        // shftr
+                5'b00101: result = input1 >> input2;        // shftri
+                5'b00110: result = input1 << input2;        // shftl
+                5'b00111: result = input1 << input2;        // shftli
+                5'b10001: result = input1;                  // mov $r_d, $r_s
+                5'b10010: result = {input1[63:12], input2[11:0]}; // mov $r_d, L
+                5'b10100: begin                             // addf
+                    rres = r1 + r2;
+                    result = $realtobits(rres);
+                end
+                5'b10101: begin                             // subf
+                    rres = r1 - r2;
+                    result = $realtobits(rres);
+                end
+                5'b10110: begin                             // mulf
+                    rres = r1 * r2;
+                    result = $realtobits(rres);
+                end
+                5'b10111: begin                             // divf
+                    rres = r1 / r2;
+                    result = $realtobits(rres);
+                end
+                default: begin
+                    flag = 0;
+                    result = 64'b0;
+                end
+            endcase
+        end
+    endmodule
+
+    // Instantiate all modules within tinker_core
+    fetch fetch_inst (
+        .clk(clk),
+        .reset(reset),
         .r31(stackPtr),
-        .next_pc(nextProgramCounter),
-        .pc(programCounter)
+        .next_pc(pc),
+        .pc(next_pc)
     );
 
-    storageUnit memUnit (
-        .pc(programCounter),
-        .clk(clock),
-        .reset(rst),
-        .flag(memWriteEnable),
-        .writeData(memWriteValue),
-        .rwAddress(memAccessAddr),
-        .readData(memReadData),
-        .instruction(currentInstruction)
+    memory memory_inst (
+        .pc(next_pc),
+        .clk(clk),
+        .reset(reset),
+        .flag(memWriteFlag),
+        .writeData(memWriteData),
+        .rwAddress(rwAddress),
+        .readData(memOutput),
+        .instruction(instruction)
     );
 
-    insnParser decodeUnit (
-        .insn(currentInstruction),
-        .opCode(operationCode),
-        .regD(destReg),
-        .regS1(sourceReg1),
-        .regS2(sourceReg2),
-        .immVal(immediateValue)
+    control control_inst (
+        .op(opcode),
+        .rd(rd_val),
+        .rs(rs_val),
+        .rt(rt_val),
+        .lit(literal),
+        .inputPc(next_pc),
+        .memData(memOutput),
+        .pc(pc)
     );
 
-    regBank registers (
-        .clk(clock),
-        .reset(rst),
-        .data(memToRegWrite ? memReadData : aluOutput),
-        .read1(sourceReg1),
-        .read2(sourceReg2),
-        .write(destReg),
-        .memFlag(memToRegWrite),
-        .regFlag(aluWriteEnable),
-        .output1(regSrc1Val),
-        .output2(regSrc2Val),
-        .output3(regDestVal),
+    memoryHandler memoryHandler_inst (
+        .opcode(opcode),
+        .rd(rd_val),
+        .rs(rs_val),
+        .lit(literal),
+        .pc(next_pc),
+        .r31(stackPtr),
+        .rwAddress(rwAddress),
+        .writeData(memWriteData),
+        .writeFlag(memWriteFlag),
+        .regWrite(regWriteMem)
+    );
+
+    instructionDecoder id (
+        .instructionLine(instruction),
+        .literal(literal),
+        .rd(rd),
+        .rs(rs),
+        .rt(rt),
+        .opcode(opcode)
+    );
+
+    registerFile reg_file (
+        .clk(clk),
+        .reset(reset),
+        .memFlag(regWriteMem),
+        .regFlag(regWriteALU),
+        .data(data),
+        .read1(rs),
+        .read2(rt),
+        .write(rd),
+        .output1(rs_val),
+        .output2(rt_val),
+        .output3(rd_val),
         .stackPtr(stackPtr)
     );
 
-    operandMux opSelect (
-        .sel(operationCode),
-        .reg1(regSrc2Val),
-        .lit(immediateValue),
-        .out(secondOperand)
+    reglitmux mux (
+        .sel(opcode),
+        .reg1(rt_val),
+        .lit(literal),
+        .out(in2)
     );
 
-    computeUnit arithmeticUnit (
-        .control(operationCode),
-        .input1(regSrc1Val),
-        .input2(secondOperand),
-        .result(aluOutput),
-        .flag(aluWriteEnable)
-    );
-
-    branchController branchUnit (
-        .op(operationCode),
-        .rd(regDestVal),
-        .rs(regSrc1Val),
-        .rt(regSrc2Val),
-        .lit(immediateValue),
-        .inputPc(programCounter),
-        .memData(memReadData),
-        .pc(nextProgramCounter)
-    );
-
-    memController memAccess (
-        .opcode(operationCode),
-        .rd(regDestVal),
-        .rs(regSrc1Val),
-        .lit(immediateValue),
-        .pc(programCounter),
-        .r31(stackPtr),
-        .rwAddress(memAccessAddr),
-        .writeData(memWriteValue),
-        .writeFlag(memWriteEnable),
-        .regWrite(memToRegWrite)
+    alu alu_inst (
+        .control(opcode),
+        .input1(rs_val),
+        .input2(in2),
+        .result(data),
+        .flag(regWriteALU)
     );
 
 endmodule
