@@ -157,18 +157,18 @@ module control(
 	 localparam CALL = 5'b01100;
 	 localparam RET = 5'b01101;
 	 localparam BRGT = 5'b01110;
-	 always @(*) begin
-	  case(op)
-	   BR: pc = rd;
-	   BRR_RD: pc = inputPc + rd;
-	   BRR_L: pc = inputPc + $signed(lit);
-	   BRNZ: pc = (rs != 0) ? rd : inputPc + 4;
-	   CALL: pc = rd;
-	   RET: pc = memData;
-	   BRGT: pc = (rs > rt) ? rd : inputPc + 4;
-	   default: pc = inputPc + 4;
-	  endcase
-	 end
+    always @(*) begin
+    case(op)
+        BR: pc = input_rd_data; // Use value from rd register
+        BRR_RD: pc = inputPc + input_rd_data; // Use value from rd register
+        BRR_L: pc = inputPc + $signed(lit); // Keep using literal (ensure sign extension)
+        BRNZ: pc = (rs != 0) ? input_rd_data : inputPc + 4; // Use value from rd register
+        CALL: pc = input_rd_data; // Use value from rd register
+        RET: pc = memData;
+        BRGT: pc = (rs > rt) ? input_rd_data : inputPc + 4; // Use value from rd register
+    default: pc = inputPc + 4;
+    endcase
+    end
 endmodule
 
 
@@ -408,10 +408,11 @@ module tinker_core(
     // Control Unit
     control control_inst(
         .op(opcode),
-        .rd(rd),
+        // .rd(rd), // <<< No longer pass the specifier directly if not needed
+        .input_rd_data(rd_data), // <<< Pass the actual data from reg[rd]
         .rs(rs_data),
         .rt(rt_data),
-        .lit(literal),
+        .lit({ {52{literal[11]}}, literal }), // <<< Explicit sign extension recommended
         .inputPc(pc),
         .memData(mem_data_out),
         .pc(new_pc)
@@ -436,11 +437,13 @@ module tinker_core(
         .clk(clk),
         .rs_addr(rs),
         .rt_addr(rt),
-        .rd_addr(rd),
-        .write_data(alu_result),
-        .write_enable(reg_write_enable),
+        .rd_addr(rd),          // Write address
+        .rd_read_addr(rd),     // <<< Add this connection for reading rd value
+        .write_data(alu_result), // Or mem_data_out depending on mux needed for LD
+        .write_enable(reg_write_enable), // Needs modification for LD/ST
         .rs_data(rs_data),
-        .rt_data(rt_data)
+        .rt_data(rt_data),
+        .rd_read_data(rd_data) // <<< Add wire [63:0] rd_data;
     );
 
     // ALU Operand Mux
