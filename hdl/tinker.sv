@@ -1,7 +1,10 @@
-module processorUnit (
+// Top-level module for Tinker CPU
+module tinker_core (
     input wire clock,
     input wire rst
 );
+
+    // Wires for interconnecting modules
     wire [63:0] programCounter, nextProgramCounter;
     wire [31:0] currentInstruction;
     wire [4:0] destReg, sourceReg1, sourceReg2, operationCode;
@@ -10,20 +13,22 @@ module processorUnit (
     wire aluWriteEnable, memWriteEnable, memToRegWrite;
     wire [63:0] secondOperand;
 
+    // Program Counter Update Unit
     module pcUpdater (
         input wire clk,
         input wire reset,
         input wire [63:0] newPc,
         output reg [63:0] currentPc
     );
-        always @(*) begin // Combinational for testing
+        always @(posedge clk or posedge reset) begin
             if (reset)
-                currentPc = 64'h2000;
+                currentPc <= 64'h2000; // Start at 0x2000
             else
-                currentPc = newPc;
+                currentPc <= newPc;
         end
     endmodule
 
+    // Memory Module (512 KB)
     module storageUnit (
         input wire [63:0] fetchAddr,
         input wire clk,
@@ -34,8 +39,9 @@ module processorUnit (
         output reg [31:0] insnOut,
         output reg [63:0] dataOut
     );
-        reg [7:0] memArray [0:524287];
+        reg [7:0] memArray [0:524287]; // 512 KB
         integer idx;
+
         always @(*) begin
             insnOut = {memArray[fetchAddr+3], memArray[fetchAddr+2],
                        memArray[fetchAddr+1], memArray[fetchAddr]};
@@ -44,6 +50,7 @@ module processorUnit (
                        memArray[dataAddr+3], memArray[dataAddr+2],
                        memArray[dataAddr+1], memArray[dataAddr]};
         end
+
         always @(posedge clk or posedge reset) begin
             if (reset) begin
                 for (idx = 0; idx < 524288; idx = idx + 1)
@@ -56,6 +63,7 @@ module processorUnit (
         end
     endmodule
 
+    // Instruction Parser
     module insnParser (
         input wire [31:0] insn,
         output reg [4:0] opCode,
@@ -69,13 +77,16 @@ module processorUnit (
             regD = insn[26:22];
             regS1 = insn[21:17];
             regS2 = insn[16:12];
-            immVal = {{52{insn[11]}}, insn[11:0]};
+            immVal = {{52{insn[11]}}, insn[11:0]}; // Sign-extend 12-bit literal
+
+            // Adjust source register for immediate instructions
             if (opCode == 5'h19 || opCode == 5'h1B || opCode == 5'h05 ||
                 opCode == 5'h07 || opCode == 5'h12)
                 regS1 = regD;
         end
     endmodule
 
+    // Register Bank
     module regBank (
         input wire clk,
         input wire reset,
@@ -91,23 +102,26 @@ module processorUnit (
     );
         reg [63:0] regs [0:31];
         integer i;
+
         always @(*) begin
             dataPort1 = regs[readPort1];
             dataPort2 = regs[readPort2];
             dataPort3 = regs[writePort];
             spOut = regs[31];
         end
+
         always @(posedge clk or posedge reset) begin
             if (reset) begin
                 for (i = 0; i < 31; i = i + 1)
                     regs[i] <= 64'b0;
-                regs[31] <= 64'd524288;
+                regs[31] <= 64'd524288; // Stack pointer init
             end else if (writeEn) begin
                 regs[writePort] <= writeData;
             end
         end
     endmodule
 
+    // Computation Unit (ALU)
     module computeUnit (
         input wire [4:0] ctrl,
         input wire [63:0] op1,
@@ -116,36 +130,38 @@ module processorUnit (
         output reg writeFlag
     );
         real fpOp1, fpOp2, fpResult;
+
         always @(*) begin
             writeFlag = 1;
             fpOp1 = $bitstoreal(op1);
             fpOp2 = $bitstoreal(op2);
+
             case (ctrl)
-                5'h18, 5'h19: outVal = op1 + op2;
-                5'h1A, 5'h1B: outVal = op1 - op2;
-                5'h1C: outVal = op1 * op2;
-                5'h1D: outVal = (op2 != 0) ? op1 / op2 : 0;
-                5'h00: outVal = op1 & op2;
-                5'h01: outVal = op1 | op2;
-                5'h02: outVal = op1 ^ op2;
-                5'h03: outVal = ~op1;
-                5'h04, 5'h05: outVal = op1 >> op2[5:0];
-                5'h06, 5'h07: outVal = op1 << op2[5:0];
-                5'h11: outVal = op1;
-                5'h12: outVal = {{52{op2[11]}}, op2[11:0]};
-                5'h14: begin
+                5'h18, 5'h19: outVal = op1 + op2;           // add, addi
+                5'h1A, 5'h1B: outVal = op1 - op2;           // sub, subi
+                5'h1C: outVal = op1 * op2;                  // mul
+                5'h1D: outVal = (op2 != 0) ? op1 / op2 : 0; // div
+                5'h00: outVal = op1 & op2;                  // and
+                5'h01: outVal = op1 | op2;                  // or
+                5'h02: outVal = op1 ^ op2;                  // xor
+                5'h03: outVal = ~op1;                       // not
+                5'h04, 5'h05: outVal = op1 >> op2[5:0];     // shftr, shftri
+                5'h06, 5'h07: outVal = op1 << op2[5:0];     // shftl, shftli
+                5'h11: outVal = op1;                        // mov $r_d, $r_s
+                5'h12: outVal = {{52{op2[11]}}, op2[11:0]}; // mov $r_d, L
+                5'h14: begin                                // addf
                     fpResult = fpOp1 + fpOp2;
                     outVal = $realtobits(fpResult);
                 end
-                5'h15: begin
+                5'h15: begin                                // subf
                     fpResult = fpOp1 - fpOp2;
                     outVal = $realtobits(fpResult);
                 end
-                5'h16: begin
+                5'h16: begin                                // mulf
                     fpResult = fpOp1 * fpOp2;
                     outVal = $realtobits(fpResult);
                 end
-                5'h17: begin
+                5'h17: begin                                // divf
                     fpResult = (fpOp2 != 0.0) ? fpOp1 / fpOp2 : 0.0;
                     outVal = $realtobits(fpResult);
                 end
@@ -157,30 +173,40 @@ module processorUnit (
         end
     endmodule
 
+    // Branch Control Unit
     module branchController (
         input wire [4:0] op,
-        input wire [63:0] targetReg,
+        input wire [63:0] targetReg,  // for brr $r_d, used as signed offset
         input wire [63:0] compReg1,
         input wire [63:0] compReg2,
-        input wire [63:0] immOffset,
+        input wire [63:0] immOffset,  // immediate branch offset (assumed already sign-extended)
         input wire [63:0] currentPc,
         input wire [63:0] memVal,
         output reg [63:0] nextPc
     );
         always @(*) begin
             case (op)
-                5'h08: nextPc = targetReg & 64'hFFFFFFFFFFFFFFFC;
-                5'h09: nextPc = (currentPc + targetReg) & 64'hFFFFFFFFFFFFFFFC;
-                5'h0A: nextPc = (currentPc + $signed(immOffset)) & 64'hFFFFFFFFFFFFFFFC;
-                5'h0B: nextPc = (compReg1 != 0) ? targetReg : currentPc + 4;
-                5'h0C: nextPc = targetReg & 64'hFFFFFFFFFFFFFFFC;
-                5'h0D: nextPc = memVal & 64'hFFFFFFFFFFFFFFFC;
-                5'h0E: nextPc = ($signed(compReg1) > $signed(compReg2)) ? targetReg : currentPc + 4;
+                // Unconditional branch: add signed immediate offset to current PC
+                5'h08: nextPc = currentPc + $signed(immOffset);                  
+                // Branch relative using a register: treat the register as a signed offset
+                5'h09: nextPc = currentPc + $signed(targetReg);      
+                // Branch relative with an immediate: same as the unconditional branch
+                5'h0A: nextPc = currentPc + $signed(immOffset); 
+                // Branch if nonzero: if compReg1 is nonzero, branch using the immediate offset
+                5'h0B: nextPc = (compReg1 != 0) ? currentPc + $signed(immOffset) : currentPc + 4;
+                // Call: branch relative and let the memory controller handle writing the return address (PC+4)
+                5'h0C: nextPc = currentPc + $signed(immOffset);                  
+                // Return: jump to the address read from memory (no PC-relative addition here)
+                5'h0D: nextPc = memVal;                     
+                // Branch if greater than: branch relative when compReg1 > compReg2
+                5'h0E: nextPc = (compReg1 > compReg2) ? currentPc + $signed(immOffset) : currentPc + 4;
+                // Default: if none of the opcodes match, increment PC by 4
                 default: nextPc = currentPc + 4;
             endcase
         end
     endmodule
 
+    // Memory Access Controller
     module memController (
         input wire [4:0] opCode,
         input wire [63:0] baseReg,
@@ -198,16 +224,17 @@ module processorUnit (
             writeVal = 64'b0;
             writeEn = 0;
             regWriteEn = 0;
-            if (opCode == 5'h0C) begin
+
+            if (opCode == 5'h0C) begin          // call
                 accessAddr = stackReg - 8;
-                writeVal = pcVal + 4; // Align with friend’s logic
+                writeVal = pcVal + 4;
                 writeEn = 1;
-            end else if (opCode == 5'h0D) begin
+            end else if (opCode == 5'h0D) begin // return
                 accessAddr = stackReg - 8;
-            end else if (opCode == 5'h10) begin
+            end else if (opCode == 5'h10) begin // mov $r_d, ($r_s)(L)
                 accessAddr = srcReg + offset;
                 regWriteEn = 1;
-            end else if (opCode == 5'h13) begin
+            end else if (opCode == 5'h13) begin // mov ($r_d)(L), $r_s
                 accessAddr = baseReg + offset;
                 writeVal = srcReg;
                 writeEn = 1;
@@ -215,6 +242,7 @@ module processorUnit (
         end
     endmodule
 
+    // Operand Selector
     module operandMux (
         input wire [4:0] select,
         input wire [63:0] regInput,
@@ -230,25 +258,85 @@ module processorUnit (
         end
     endmodule
 
-    pcUpdater pcUnit (.clk(clock), .reset(rst), .newPc(nextProgramCounter), .currentPc(programCounter));
-    storageUnit memUnit (.fetchAddr(programCounter), .clk(clock), .reset(rst), .writeEn(memWriteEnable),
-                         .dataIn(memWriteValue), .dataAddr(memAccessAddr), .insnOut(currentInstruction),
-                         .dataOut(memReadData));
-    insnParser decodeUnit (.insn(currentInstruction), .opCode(operationCode), .regD(destReg),
-                           .regS1(sourceReg1), .regS2(sourceReg2), .immVal(immediateValue));
-    regBank registers (.clk(clock), .reset(rst), .writeEn(aluWriteEnable | memToRegWrite),
-                       .writeData(memToRegWrite ? memReadData : aluOutput), .readPort1(sourceReg1),
-                       .readPort2(sourceReg2), .writePort(destReg), .dataPort1(regSrc1Val),
-                       .dataPort2(regSrc2Val), .dataPort3(regDestVal), .spOut(stackPtr));
-    operandMux opSelect (.select(operationCode), .regInput(regSrc2Val), .immInput(immediateValue),
-                         .selected(secondOperand));
-    computeUnit arithmeticUnit (.ctrl(operationCode), .op1(regSrc1Val), .op2(secondOperand),
-                                .outVal(aluOutput), .writeFlag(aluWriteEnable));
-    branchController branchUnit (.op(operationCode), .targetReg(regDestVal), .compReg1(regSrc1Val),
-                                 .compReg2(regSrc2Val), .immOffset(immediateValue), .currentPc(programCounter),
-                                 .memVal(memReadData), .nextPc(nextProgramCounter));
-    memController memAccess (.opCode(operationCode), .baseReg(regDestVal), .srcReg(regSrc1Val),
-                             .offset(immediateValue), .pcVal(programCounter), .stackReg(stackPtr),
-                             .accessAddr(memAccessAddr), .writeVal(memWriteValue), .writeEn(memWriteEnable),
-                             .regWriteEn(memToRegWrite));
+    // Instantiate modules
+    pcUpdater pcUnit (
+        .clk(clock),
+        .reset(rst),
+        .newPc(nextProgramCounter),
+        .currentPc(programCounter)
+    );
+
+    storageUnit memUnit (
+        .fetchAddr(programCounter),
+        .clk(clock),
+        .reset(rst),
+        .writeEn(memWriteEnable),
+        .dataIn(memWriteValue),
+        .dataAddr(memAccessAddr),
+        .insnOut(currentInstruction),
+        .dataOut(memReadData)
+    );
+
+    insnParser decodeUnit (
+        .insn(currentInstruction),
+        .opCode(operationCode),
+        .regD(destReg),
+        .regS1(sourceReg1),
+        .regS2(sourceReg2),
+        .immVal(immediateValue)
+    );
+
+    regBank registers (
+        .clk(clock),
+        .reset(rst),
+        .writeEn(aluWriteEnable | memToRegWrite),
+        .writeData(memToRegWrite ? memReadData : aluOutput),
+        .readPort1(sourceReg1),
+        .readPort2(sourceReg2),
+        .writePort(destReg),
+        .dataPort1(regSrc1Val),
+        .dataPort2(regSrc2Val),
+        .dataPort3(regDestVal),
+        .spOut(stackPtr)
+    );
+
+    operandMux opSelect (
+        .select(operationCode),
+        .regInput(regSrc2Val),
+        .immInput(immediateValue),
+        .selected(secondOperand)
+    );
+
+    computeUnit arithmeticUnit (
+        .ctrl(operationCode),
+        .op1(regSrc1Val),
+        .op2(secondOperand),
+        .outVal(aluOutput),
+        .writeFlag(aluWriteEnable)
+    );
+
+    branchController branchUnit (
+        .op(operationCode),
+        .targetReg(regDestVal),
+        .compReg1(regSrc1Val),
+        .compReg2(regSrc2Val),
+        .immOffset(immediateValue),
+        .currentPc(programCounter),
+        .memVal(memReadData),
+        .nextPc(nextProgramCounter)
+    );
+
+    memController memAccess (
+        .opCode(operationCode),
+        .baseReg(regDestVal),
+        .srcReg(regSrc1Val),
+        .offset(immediateValue),
+        .pcVal(programCounter),
+        .stackReg(stackPtr),
+        .accessAddr(memAccessAddr),
+        .writeVal(memWriteValue),
+        .writeEn(memWriteEnable),
+        .regWriteEn(memToRegWrite)
+    );
+
 endmodule
