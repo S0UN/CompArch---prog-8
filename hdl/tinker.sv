@@ -1,5 +1,5 @@
 // Top-level module for Tinker CPU
-module processorUnit (
+module tinker_core (
     input wire clock,
     input wire rst
 );
