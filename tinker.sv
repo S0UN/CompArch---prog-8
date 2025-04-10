@@ -1,4 +1,5 @@
-module fetch_unit(
+// Fetch Unit
+module fetch_unit (
     input logic clock,
     input logic reset,
     input logic [63:0] r31,
@@ -15,7 +16,8 @@ module fetch_unit(
     end
 endmodule
 
-module memory_unit(
+// Memory Unit
+module memory_unit (
     input logic [63:0] curr_pc,
     input logic clock,
     input logic reset,
@@ -56,7 +58,8 @@ module memory_unit(
     end
 endmodule
 
-module control_unit(
+// Control Unit
+module control_unit (
     input logic [4:0] op,
     input logic [63:0] dest_val,
     input logic [63:0] src_val,
@@ -69,8 +72,8 @@ module control_unit(
     always @(*) begin
         case (op)
             5'b01000: ctrl_pc = dest_val;                     // br
-            5'b01001: ctrl_pc = curr_pc + dest_val;             // brr $r_d
-            5'b01010: ctrl_pc = curr_pc + $signed(imm_val);      // brr L
+            5'b01001: ctrl_pc = curr_pc + dest_val;           // brr $r_d
+            5'b01010: ctrl_pc = curr_pc + $signed(imm_val);   // brr L
             5'b01011: ctrl_pc = (src_val != 0) ? dest_val : curr_pc + 4; // brnz
             5'b01100: ctrl_pc = dest_val;                     // call
             5'b01101: ctrl_pc = memData;                      // return
@@ -80,7 +83,8 @@ module control_unit(
     end
 endmodule
 
-module mem_handler(
+// Memory Handler
+module mem_handler (
     input logic [4:0] op,
     input logic [63:0] dest_val,
     input logic [63:0] src_val,
@@ -128,7 +132,8 @@ module mem_handler(
     end
 endmodule
 
-module inst_decoder(
+// Instruction Decoder
+module inst_decoder (
     input logic [31:0] inst_line,
     output logic [63:0] imm_val,
     output logic [4:0] dest,
@@ -152,7 +157,8 @@ module inst_decoder(
     end
 endmodule
 
-module reg_file_bank(
+// Register File
+module reg_file_bank (
     input logic [63:0] wr_data,
     input logic [4:0] raddr1,
     input logic [4:0] raddr2,
@@ -185,7 +191,8 @@ module reg_file_bank(
     end
 endmodule
 
-module reg_lit_mux(
+// Register/Literal Mux
+module reg_lit_mux (
     input logic [4:0] sel,
     input logic [63:0] reg_val,
     input logic [63:0] imm_val,
@@ -203,7 +210,8 @@ module reg_lit_mux(
     end
 endmodule
 
-module alu_unit(
+// ALU Unit
+module alu_unit (
     input logic [4:0] control,
     input logic [63:0] in1,
     input logic [63:0] in2,
@@ -230,21 +238,21 @@ module alu_unit(
             5'b00101: out = in1 >> in2;        // shftri
             5'b00110: out = in1 << in2;        // shftl
             5'b00111: out = in1 << in2;        // shftli
-            5'b10001: out = in1;              // mov $r_d, $r_s
+            5'b10001: out = in1;               // mov $r_d, $r_s
             5'b10010: out = {in1[63:12], in2[11:0]}; // mov $r_d, L
-            5'b10100: begin                   // addf
+            5'b10100: begin                    // addf
                 rres = r1 + r2;
                 out = $realtobits(rres);
             end
-            5'b10101: begin                   // subf
+            5'b10101: begin                    // subf
                 rres = r1 - r2;
                 out = $realtobits(rres);
             end
-            5'b10110: begin                   // mulf
+            5'b10110: begin                    // mulf
                 rres = r1 * r2;
                 out = $realtobits(rres);
             end
-            5'b10111: begin                   // divf
+            5'b10111: begin                    // divf
                 rres = r1 / r2;
                 out = $realtobits(rres);
             end
@@ -256,7 +264,8 @@ module alu_unit(
     end
 endmodule
 
-module tinker_core(
+// Top-Level Module
+module tinker_core (
     input logic clock,
     input logic reset
 );
@@ -267,7 +276,7 @@ module tinker_core(
     logic [63:0] stack_ptr, mem_wr_data, mem_rw_addr, mem_out;
     logic mem_wr_flag, reg_wr_mem, reg_wr_alu;
 
-    fetch_unit fetch_inst(
+    fetch_unit fetch_inst (
         .clock(clock),
         .reset(reset),
         .r31(stack_ptr),
@@ -275,7 +284,7 @@ module tinker_core(
         .curr_pc(currPC)
     );
 
-    memory_unit memory_inst(
+    memory_unit memory_inst (
         .curr_pc(currPC),
         .clock(clock),
         .reset(reset),
@@ -286,7 +295,7 @@ module tinker_core(
         .inst_word(inst_word)
     );
 
-    control_unit control_inst(
+    control_unit control_inst (
         .op(opCode),
         .dest_val(dest_val),
         .src_val(src_val1),
@@ -297,7 +306,7 @@ module tinker_core(
         .ctrl_pc(nextPC)
     );
 
-    mem_handler mem_handler_inst(
+    mem_handler mem_handler_inst (
         .op(opCode),
         .dest_val(dest_val),
         .src_val(src_val1),
@@ -310,7 +319,7 @@ module tinker_core(
         .reg_write(reg_wr_mem)
     );
 
-    inst_decoder inst_dec(
+    inst_decoder inst_dec (
         .inst_line(inst_word),
         .imm_val(imm_val),
         .dest(dest),
@@ -319,12 +328,12 @@ module tinker_core(
         .op(opCode)
     );
 
-    reg_file_bank reg_file_inst(
+    reg_file_bank reg_file_inst (
         .clock(clock),
         .reset(reset),
         .mem_wr(reg_wr_mem),
         .reg_wr(reg_wr_alu),
-        .wr_data(alu_out),
+        .wr_data(reg_wr_mem ? mem_out : alu_out), // Added mux for memory write-back
         .raddr1(src1),
         .raddr2(src2),
         .wr_addr(dest),
@@ -334,14 +343,14 @@ module tinker_core(
         .stack_ptr(stack_ptr)
     );
 
-    reg_lit_mux mux_inst(
+    reg_lit_mux mux_inst (
         .sel(opCode),
         .reg_val(src_val2),
         .imm_val(imm_val),
         .out(operand2)
     );
 
-    alu_unit alu_inst(
+    alu_unit alu_inst (
         .control(opCode),
         .in1(src_val1),
         .in2(operand2),
