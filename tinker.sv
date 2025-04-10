@@ -18,7 +18,7 @@ module tinker_core (
         .pc_out(pc_current)
     );
 
-    memory_unit memory (  // Renamed to match 'core.memory'
+    memory_unit memory (  
         .program_counter(pc_current),
         .clk(clk),
         .reset(reset),
@@ -62,7 +62,7 @@ module tinker_core (
         .opcode(opcode)
     );
 
-    reg_file_bank reg_file (  // Renamed to match 'core.reg_file'
+    reg_file_bank reg_file (  
         .clk(clk),
         .reset(reset),
         .mem_write_en(write_from_mem),
@@ -179,7 +179,7 @@ module reg_file_bank (
     output logic [63:0] data_dest,
     output logic [63:0] stack
 );
-    logic [63:0] registers [0:31];  // Named to match 'core.reg_file.registers'
+    logic [63:0] registers [0:31]; 
     logic write_en;
     integer i;
 
@@ -217,7 +217,7 @@ module inst_decoder (
         imm = {52'h0, instruction[11:0]};
         case (opcode)
             5'b11001, 5'b11011, 5'b00101, 5'b00111, 5'b10010: src1 = dest;
-            default: ; // No change
+            default: ; 
         endcase
     end
 endmodule
@@ -307,7 +307,7 @@ module memory_unit (
     output logic [63:0] data_out,
     output logic [31:0] instruction
 );
-    logic [7:0] bytes [0:524287];  // Named to match 'core.memory.bytes'
+    logic [7:0] bytes [0:524287]; 
     integer j, k;
 
     assign instruction[31:24] = bytes[program_counter+3];
