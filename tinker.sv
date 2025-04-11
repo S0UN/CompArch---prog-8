@@ -99,14 +99,14 @@ module tinker_core (
             default:     next_state = S_FETCH;
         endcase
     end
-always @(*) begin // Control Signals block
+    always @(*) begin // CHANGE BACK TO THIS
         // --- Default values MUST be assigned FIRST ---
         ir_write = 1'b0;
-        pc_write_enable = 1'b0;   // Default OFF
-        reg_write = 1'b0;         // Default OFF
+        pc_write_enable = 1'b0;
+        reg_write = 1'b0;
         mem_read = 1'b0;
         mem_write = 1'b0;
-        mem_to_reg = 1'b0;        // Default from ALU
+        mem_to_reg = 1'b0;
         hlt = 1'b0;
         memory_unit_address = mem_addr;
 
@@ -187,24 +187,12 @@ always @(*) begin // Control Signals block
         end
     end
 
-// ALU Output Register - Revised Latch Condition
+// ALU Output Register - Revert to simpler latch condition
     always @(posedge clk or posedge reset) begin
        if (reset) begin
            alu_out_reg <= 64'b0; // Reset to 0
-       // Only latch ALU result in EXECUTE state for instructions that are expected
-       // to write back the ALU result later. This prevents latching during
-       // branches or memory operations where alu_output might be irrelevant or unstable.
-       end else if (current_state == S_EXECUTE) begin
-           // Check if the instruction type typically writes back from ALU
-           // (This excludes stores, branches, jumps, call, return, halt)
-           // Essentially, is it an R-type or I-type ALU op or mov?
-           // We can approximate this by checking if reg_write would be enabled later
-           // (excluding the load case where mem_to_reg is high)
-           // Simpler: Check if it's NOT a memory op AND NOT a branch/jump/call/ret/halt
-           if (!is_memory_operation(opcode) && !is_branch_no_writeback(opcode)) begin
-               alu_out_reg <= alu_output;
-           end
-           // Otherwise, alu_out_reg holds its previous value.
+       end else if (current_state == S_EXECUTE) begin // Latch whenever in EXECUTE state
+            alu_out_reg <= alu_output;
        end
     end
 
