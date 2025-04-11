@@ -32,6 +32,8 @@ module tinker_core (
     logic [4:0]  opcode;            // Output from inst_decoder
     logic [63:0] imm_value;         // Output from inst_decoder
 
+	logic [63:0] return_addr_reg;
+	
     // Register File Signals
     logic [63:0] dest_val;          // Output from reg_file (data_dest port)
     logic [63:0] src_val1;          // Output from reg_file (data1 port)
@@ -71,6 +73,14 @@ module tinker_core (
         else
             current_state <= next_state;
     end
+
+	always_ff @(posedge clk or posedge reset) begin
+    if (reset) begin
+        return_addr_reg <= 64'b0; // Reset the register
+    end else if (current_state == S_DECODE && opcode == 5'b01100) begin
+        return_addr_reg <= pc_current + 64'd4; // Latch PC + 4 for call
+    end
+end
 
     // --- Next State Logic ---
     always @(*) begin
@@ -120,7 +130,7 @@ module tinker_core (
             S_DECODE: begin // OK
             end
             S_EXECUTE: begin // OK?
-                if (is_branch_instr && branch_taken) begin
+                if (is_branch_instr && branch_taken && opcode != 5'b01101) begin
                     pc_write_enable = 1'b1; // PC update for taken branch
                 end
             end
@@ -143,9 +153,12 @@ module tinker_core (
                     mem_to_reg = 1'b0; // Should be TRUE for ADD/AND
                 end
                 // PC WRITE ENABLE (Sequential)
-                if (!branch_taken) begin // branch_taken should be FALSE for ADD/AND
+				if (opcode == 5'b01101) begin // Return: update PC with return address
+                pc_write_enable = 1'b1;
+           		end else if (!branch_taken) begin // branch_taken should be FALSE for ADD/AND
                     pc_write_enable = 1'b1; // Should be TRUE for ADD/AND
                 end
+               
             end
             S_HALTED: begin // OK
                 hlt = 1'b1;
@@ -231,17 +244,17 @@ module tinker_core (
         .branch_taken(branch_taken)    // Should be logic
     );
 
-    mem_handler mem_mgr (
-        .op(opcode),                   // Should be logic [4:0]
-        .dest(dest_val),               // Should be logic [63:0]
-        .src(src_val1),                // Should be logic [63:0]
-        .imm(imm_value),               // Should be logic [63:0]
-        .pc(pc_current),               // Should be logic [63:0]
-        .r31(stack_ptr),               // Should be logic [63:0]
-        .addr_out(mem_addr),           // Should be logic [63:0]
-        .data_out(mem_data_in)         // Should be logic [63:0]
-    );
-
+	mem_handler mem_mgr (
+		.op(opcode),
+		.dest(dest_val),
+		.src(src_val1),
+		.imm(imm_value),
+		.pc(pc_current),
+		.r31(stack_ptr),
+		.return_addr(return_addr_reg), // New connection
+		.addr_out(mem_addr),
+		.data_out(mem_data_in)
+	);
     inst_decoder dec (
         .instruction(instr_reg),       // Should be logic [31:0]
         .imm(imm_value),               // Should be logic [63:0]
@@ -352,7 +365,6 @@ module memory_unit (
     end
 endmodule
 
-
 module control_unit (
     input logic [4:0] operation,
     input logic [63:0] dest_in,     // Value of Rd register (used as target addr for br, brnz, brgt, call; offset for brr rd)
@@ -367,89 +379,100 @@ module control_unit (
 );
     logic branch_condition_met;
 
-    // Identify ALL branch/jump/call/ret types correctly
-    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110); // Opcodes 0x8 to 0xE inclusive
+    // Explicit check for individual branch-related opcodes
+    always @(*) begin
+        is_branch = 1'b0;
+        if (operation == 5'b01000 || // br
+            operation == 5'b01001 || // brr
+            operation == 5'b01010 || // brr L
+            operation == 5'b01011 || // brnz
+            operation == 5'b01110)   // brgt
+        begin
+            is_branch = 1'b1;
+        end
+    end
 
     always @(*) begin
         // Determine if condition is met (only relevant for conditional branches)
         case(operation)
-            5'b01011: branch_condition_met = (src_in1 != 0); // brnz condition check: is Rs != 0 ? (Rs mapped to src_in1)
-            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2)); // brgt condition check: is Rs > Rt (signed)?
-            default: branch_condition_met = 1'b1; // Assume true (condition met or irrelevant) for others
+            5'b01011: branch_condition_met = (src_in1 != 0); // brnz
+            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2)); // brgt
+            default: branch_condition_met = 1'b1; // Assume true (unconditional or not applicable)
         endcase
 
-        // Determine next PC value and if branch is effectively taken
-        branch_taken = 1'b0;        // Default: branch not taken
-        next_pc = current_pc + 4; // Default: next PC is sequential
+        // Default next PC and taken signal
+        branch_taken = 1'b0;
+        next_pc = current_pc + 4;
 
         case (operation)
-            // Unconditional Jumps / Call / Ret
             5'b01000: begin // br $rd
-                        next_pc = dest_in;          // Target address is the value read from Rd (dest_in)
-                        branch_taken = 1'b1;
-                     end
+                next_pc = dest_in;
+                branch_taken = 1'b1;
+            end
             5'b01100: begin // call $rd
-                        next_pc = dest_in;          // Target address is the value read from Rd (dest_in)
-                        branch_taken = 1'b1;
-                     end
+                next_pc = dest_in;
+                branch_taken = 1'b1;
+            end
             5'b01101: begin // return
-                        next_pc = memory_data;      // Target address is read from memory (stack)
-                        branch_taken = 1'b1;
-                     end
-
-             // Relative Jumps
+                next_pc = memory_data;
+                branch_taken = 1'b1;
+            end
             5'b01001: begin // brr $rd
-                        next_pc = current_pc + dest_in; // Target is PC + value read from Rd (dest_in)
-                        branch_taken = 1'b1;
-                     end
-            5'b01010: begin // brr L <-- CORRECTED: Handled here
-                        next_pc = current_pc + immediate; // Target is PC + sign-extended immediate
-                        branch_taken = 1'b1;
-                     end
-
-             // Conditional Branches
-            5'b01011: begin // brnz $rd, $rs <-- CORRECTED: Handled here
-                        if (branch_condition_met) begin   // Check if Rs (src_in1) != 0
-                            next_pc = dest_in;          // Target is value read from Rd (dest_in)
-                            branch_taken = 1'b1;
-                        end // else: branch not taken, defaults (PC+4, branch_taken=0) apply
-                     end
+                next_pc = current_pc + dest_in;
+                branch_taken = 1'b1;
+            end
+            5'b01010: begin // brr L
+                next_pc = current_pc + immediate;
+                branch_taken = 1'b1;
+            end
+            5'b01011: begin // brnz $rd, $rs
+                if (branch_condition_met) begin
+                    next_pc = dest_in;
+                    branch_taken = 1'b1;
+                end
+            end
             5'b01110: begin // brgt $rd, $rs, $rt
-                        if (branch_condition_met) begin   // Check if Rs (src_in1) > Rt (src_in2) signed
-                            next_pc = dest_in;          // Target is value read from Rd (dest_in)
-                            branch_taken = 1'b1;
-                        end // else: branch not taken, defaults (PC+4, branch_taken=0) apply
-                     end
-
-             // Default for non-branch instructions
+                if (branch_condition_met) begin
+                    next_pc = dest_in;
+                    branch_taken = 1'b1;
+                end
+            end
             default: begin
-                        // Keep defaults: next_pc = current_pc + 4; branch_taken = 0;
-                     end
+                // default next_pc and branch_taken already set above
+            end
         endcase
     end
 endmodule
 
 
+
 // Modified Memory Handler (Using always @(*))
 module mem_handler (
-    input logic [4:0] op,
-    input logic [63:0] dest,
-    input logic [63:0] src,
-    input logic [63:0] imm,
-    input logic [63:0] pc,
-    input logic [63:0] r31,
-    output logic [63:0] addr_out,
-    output logic [63:0] data_out
+		input logic [4:0] op,
+		input logic [63:0] dest,
+		input logic [63:0] src,
+		input logic [63:0] imm,
+		input logic [63:0] pc,
+		input logic [63:0] r31,
+		input logic [63:0] return_addr, // New input
+		output logic [63:0] addr_out,
+		output logic [63:0] data_out
 );
     always @(*) begin // Changed from always_comb
         addr_out = 64'h0;
         data_out = 64'h0;
         case (op)
-            5'b01100: begin addr_out = r31 - 8; data_out = pc + 4; end
+			5'b01100: begin // Call instruction
+				addr_out = r31 - 8; // Stack pointer adjustment (match your design)
+				data_out = return_addr; // Use latched return address
+			end
             5'b01101: begin addr_out = r31 - 8; data_out = 64'h0; end
             5'b10000: begin addr_out = src + imm; data_out = 64'h0; end
             5'b10011: begin addr_out = dest + imm; data_out = src; end
-            default: begin /* Keep defaults */ end
+            default: begin 
+				addr_out = 64'b0;
+            	data_out = 64'b0; 
+				end
         endcase
     end
 endmodule
