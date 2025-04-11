@@ -501,7 +501,7 @@ module alu_unit (
         endcase
     end
 endmodule
-// Instruction Decoder (Modified src1 mapping for ADDI/SUBI)
+// Instruction Decoder (Modified src1 mapping for ADDI/SUBI/SHFTRI/SHFTLI)
 module inst_decoder (
     input logic [31:0] instruction,
     output logic [63:0] imm,
@@ -526,12 +526,18 @@ module inst_decoder (
         // Default mapping: src1 normally comes from field [21:17]
         src1 = instruction[21:17];
 
-        // Override mapping specifically for ADDI (11001) and SUBI (11011)
-        if (opcode_internal == 5'b11001 || opcode_internal == 5'b11011) begin
-            // For ADDI/SUBI: Use the destination register field [26:22] as src1 address
+        // Override mapping specifically for certain I-type ALU instructions
+        if (opcode_internal == 5'b11001 || // addi (Op1)
+            opcode_internal == 5'b11011 || // subi (Op1)
+            opcode_internal == 5'b01010 || // addi (Op2)
+            opcode_internal == 5'b01011 || // subi (Op2)
+            opcode_internal == 5'b00101 || // shftri <-- ADDED
+            opcode_internal == 5'b00111 )  // shftli <-- ADDED
+        begin
+            // For these I-type ops: Use the destination register field [26:22] as src1 address
             src1 = instruction[26:22];
         end
-        // For all other opcodes, the default mapping applies.
+        // For all other opcodes (R-type, branches, loads, stores, etc.), the default mapping applies.
     end
 
 endmodule
