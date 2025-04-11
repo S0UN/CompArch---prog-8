@@ -31,7 +31,7 @@ module tinker_core (
     logic [4:0]  src_reg2;          // Output from inst_decoder
     logic [4:0]  opcode;            // Output from inst_decoder
     logic [63:0] imm_value;         // Output from inst_decoder
-
+    logic [63:0] pc_decode;
     // Register File Signals
     logic [63:0] dest_val;          // Output from reg_file (data_dest port)
     logic [63:0] src_val1;          // Output from reg_file (data1 port)
@@ -197,6 +197,15 @@ module tinker_core (
        end
     end
 
+    // Add pc_decode latching
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            pc_decode <= 64'h0;
+        end else if (current_state == S_DECODE) begin
+            pc_decode <= pc_current;
+        end
+    end
+
     // --- Instantiations --- (Connections should now match declared signal widths)
     fetch_unit fetch (
         .clk(clk),
@@ -237,6 +246,7 @@ module tinker_core (
         .src(src_val1),                // Should be logic [63:0]
         .imm(imm_value),               // Should be logic [63:0]
         .pc(pc_current),               // Should be logic [63:0]
+        .pc_decode(pc_decode),
         .r31(stack_ptr),               // Should be logic [63:0]
         .addr_out(mem_addr),           // Should be logic [63:0]
         .data_out(mem_data_in)         // Should be logic [63:0]
@@ -420,6 +430,7 @@ module mem_handler (
     input logic [63:0] imm,
     input logic [63:0] pc,
     input logic [63:0] r31,
+    input logic [63:0] pc_decode,
     output logic [63:0] addr_out,
     output logic [63:0] data_out
 );
@@ -427,7 +438,7 @@ module mem_handler (
         addr_out = 64'h0;
         data_out = 64'h0;
         case (op)
-            5'b01100: begin addr_out = r31 - 8; data_out = pc + 4; end
+            5'b01100: begin addr_out = r31 - 8; data_out = pc_decode + 4; end  // Use pc_decode for call
             5'b01101: begin addr_out = r31 - 8; data_out = 64'h0; end
             5'b10000: begin addr_out = src + imm; data_out = 64'h0; end
             5'b10011: begin addr_out = dest + imm; data_out = src; end
@@ -465,7 +476,7 @@ module reg_file_bank (
         if (reset) begin
             for (i = 0; i < 31; i = i + 1) begin registers[i] <= 64'h0; end
             registers[31] <= MEMSIZE;
-        end else if (write_en && write_addr != 5'b0) begin
+        end else if (write_en) begin
             registers[write_addr] <= write_data;
         end
     end
