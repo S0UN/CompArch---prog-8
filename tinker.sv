@@ -371,8 +371,9 @@ module control_unit (
 endmodule
 
 // Modified Memory Handler with state input
+
 module mem_handler (
-    input state_t state,
+    input logic [2:0] state,  // Change from state_t to logic [2:0]
     input logic [4:0] op,
     input logic [63:0] dest,
     input logic [63:0] src,
@@ -382,6 +383,7 @@ module mem_handler (
     output logic [63:0] addr_out,
     output logic [63:0] data_out
 );
+    // Rest of the module remains the same
     always_comb begin
         case (op)
             5'b01100: begin  // call
