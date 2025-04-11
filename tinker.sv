@@ -334,7 +334,7 @@ module fetch_unit (
     end
 endmodule
 
-// Modified Memory Unit with read enable
+// Modified Memory Unit with 512KB size
 module memory_unit (
     input logic [63:0] program_counter, // Unused if address port handles fetch too
     input logic clk,
@@ -346,13 +346,14 @@ module memory_unit (
     output logic [63:0] data_out,   // Combinational data output
     output logic [31:0] instruction // Combinational instruction output
 );
-    // Reduced memory size for faster simulation init if needed
-    localparam MEM_SIZE_BYTES = 32768; // 32KB
+    // Memory size set to 512 KB
+    localparam MEM_SIZE_BYTES = 524288; // 512 * 1024 = 524288
     logic [7:0] bytes [0:MEM_SIZE_BYTES-1];
     integer j, k;
 
     // Instruction and data outputs (Combinational Reads based on address)
     // Use address input directly for both fetch and data reads
+    // Bounds checking remains important
     assign instruction[7:0]   = (address + 0 < MEM_SIZE_BYTES) ? bytes[address + 0] : 8'h0;
     assign instruction[15:8]  = (address + 1 < MEM_SIZE_BYTES) ? bytes[address + 1] : 8'h0;
     assign instruction[23:16] = (address + 2 < MEM_SIZE_BYTES) ? bytes[address + 2] : 8'h0;
@@ -370,10 +371,12 @@ module memory_unit (
     // Memory write logic (Synchronous)
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
+            // Initialize memory to 0 (this might take time in simulation for large memories)
             for (j = 0; j < MEM_SIZE_BYTES; j = j + 1)
                 bytes[j] <= 8'h0;
         end
         else if (write_en) begin
+            // Write 8 bytes (64 bits) if enabled
             for (k = 0; k < 8; k = k + 1) begin
                  if ((address + k) < MEM_SIZE_BYTES) begin // Check bounds
                     bytes[address + k] <= data_in[8*k +: 8];
@@ -504,6 +507,7 @@ module mem_handler (
     end
 endmodule
 
+
 // --- MODIFIED Register File ---
 module reg_file_bank (
     input logic clk,
@@ -521,9 +525,8 @@ module reg_file_bank (
     logic [63:0] registers [0:31];
     integer i;
 
-    // Define Memory Size constant for stack pointer initialization
-    // Ideally, this comes from a parameter or package, but hardcoding to match memory_unit for now.
-    localparam MEMSIZE = 64'd32768;
+    // Define Memory Size constant for stack pointer initialization (512 KB)
+    localparam MEMSIZE = 64'd524288; // 512 * 1024
 
     // Combinational Read Ports (R0 hardwired to 0)
     assign data1 = (addr1 == 5'b0) ? 64'b0 : registers[addr1];
@@ -538,7 +541,7 @@ module reg_file_bank (
             for (i = 0; i < 31; i = i + 1) begin
                 registers[i] <= 64'h0;
             end
-            // Initialize r31 to MEMSIZE
+            // Initialize r31 to MEMSIZE (512KB address)
             registers[31] <= MEMSIZE;
         end
         // R0 is hardwired to 0, cannot be written.
