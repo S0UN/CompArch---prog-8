@@ -430,8 +430,7 @@ module mem_handler (
             5'b01100: begin addr_out = r31 - 8; data_out = pc + 4; end
             5'b01101: begin addr_out = r31 - 8; data_out = 64'h0; end
             5'b10000: begin addr_out = src + imm; data_out = 64'h0; end
-            5'b10011: begin addr_out = dest + imm; data_out = src; end // mov (rd)(L), rs
-
+            5'b10011: begin addr_out = dest + imm; data_out = src; end
             default: begin /* Keep defaults */ end
         endcase
     end
@@ -461,15 +460,15 @@ module reg_file_bank (
     assign data2 = registers[addr2];
     assign data_dest = registers[write_addr];
     assign stack = registers[31];
-	always @(posedge clk or posedge reset) begin
-		if (reset) begin
-			for (i = 0; i <= 31; i = i + 1) begin // Include all 32 registers
-				registers[i] <= (i == 31) ? MEMSIZE : 64'h0;
-			end
-		end else if (write_en) begin // Remove write_addr != 0 check
-			registers[write_addr] <= write_data;
-		end
-	end
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            for (i = 0; i < 31; i = i + 1) begin registers[i] <= 64'h0; end
+            registers[31] <= MEMSIZE;
+        end else if (write_en && write_addr != 5'b0) begin
+            registers[write_addr] <= write_data;
+        end
+    end
 endmodule
 
 module alu_unit (
@@ -493,11 +492,11 @@ module alu_unit (
             5'b00010: out = in1 ^ in2;
             5'b00011: out = ~in1;
             5'b00100: out = in1 >> in2;
-            5'b00101: out = $signed(in1) >>> in2[5:0];  // shftri
-			5'b00100: out = in1 >> in2[5:0]; // SHFTR
-			5'b00110: out = in1 << in2[5:0]; // SHFTL
+            5'b00101: out = $signed(in1) >>> in2;
+            5'b00110: out = in1 << in2;
+            5'b00111: out = in1 << in2;
             5'b10001: out = in1;
-            5'b10010: out = (in1 & 64'h000FFFFFFFFFFFFF) | ((in2 & 64'hFFF) << 52);
+            5'b10010: out = in2;
             default: out = 64'h0;
         endcase
     end
@@ -518,9 +517,7 @@ module inst_decoder (
     assign imm_raw = instruction[11:0];
     assign opcode_internal = instruction[31:27];
     assign opcode = opcode_internal; // Assign to output port
-	wire [63:0] imm_sign = {{52{imm_raw[11]}}, imm_raw};
-	wire [63:0] imm_zero = {52'b0, imm_raw};
-	assign imm = (opcode_internal == 5'b10010) ? imm_zero : imm_sign;
+    assign imm = {{52{imm_raw[11]}}, imm_raw}; // Sign extend immediate
     assign dest = instruction[26:22];          // Destination register is always field [26:22]
     assign src2 = instruction[16:12];          // src2 output always comes from src2 field [16:12]
 
