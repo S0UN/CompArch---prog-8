@@ -352,6 +352,7 @@ module memory_unit (
     end
 endmodule
 
+
 module control_unit (
     input logic [4:0] operation,
     input logic [63:0] dest_in,     // Value of Rd register (used as target addr for br, brnz, brgt, call; offset for brr rd)
@@ -366,71 +367,67 @@ module control_unit (
 );
     logic branch_condition_met;
 
-    // Explicit check for individual branch-related opcodes
-    always @(*) begin
-        is_branch = 1'b0;
-        if (operation == 5'b01000 || // br
-            operation == 5'b01001 || // brr
-            operation == 5'b01010 || // brr L
-            operation == 5'b01011 || // brnz
-            operation == 5'b01110)   // brgt
-        begin
-            is_branch = 1'b1;
-        end
-    end
+    // Identify ALL branch/jump/call/ret types correctly
+    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110); // Opcodes 0x8 to 0xE inclusive
 
     always @(*) begin
         // Determine if condition is met (only relevant for conditional branches)
         case(operation)
-            5'b01011: branch_condition_met = (src_in1 != 0); // brnz
-            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2)); // brgt
-            default: branch_condition_met = 1'b1; // Assume true (unconditional or not applicable)
+            5'b01011: branch_condition_met = (src_in1 != 0); // brnz condition check: is Rs != 0 ? (Rs mapped to src_in1)
+            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2)); // brgt condition check: is Rs > Rt (signed)?
+            default: branch_condition_met = 1'b1; // Assume true (condition met or irrelevant) for others
         endcase
 
-        // Default next PC and taken signal
-        branch_taken = 1'b0;
-        next_pc = current_pc + 4;
+        // Determine next PC value and if branch is effectively taken
+        branch_taken = 1'b0;        // Default: branch not taken
+        next_pc = current_pc + 4; // Default: next PC is sequential
 
         case (operation)
+            // Unconditional Jumps / Call / Ret
             5'b01000: begin // br $rd
-                next_pc = dest_in;
-                branch_taken = 1'b1;
-            end
+                        next_pc = dest_in;          // Target address is the value read from Rd (dest_in)
+                        branch_taken = 1'b1;
+                     end
             5'b01100: begin // call $rd
-                next_pc = dest_in;
-                branch_taken = 1'b1;
-            end
+                        next_pc = dest_in;          // Target address is the value read from Rd (dest_in)
+                        branch_taken = 1'b1;
+                     end
             5'b01101: begin // return
-                next_pc = memory_data;
-                branch_taken = 1'b1;
-            end
+                        next_pc = memory_data;      // Target address is read from memory (stack)
+                        branch_taken = 1'b1;
+                     end
+
+             // Relative Jumps
             5'b01001: begin // brr $rd
-                next_pc = current_pc + dest_in;
-                branch_taken = 1'b1;
-            end
-            5'b01010: begin // brr L
-                next_pc = current_pc + immediate;
-                branch_taken = 1'b1;
-            end
-            5'b01011: begin // brnz $rd, $rs
-                if (branch_condition_met) begin
-                    next_pc = dest_in;
-                    branch_taken = 1'b1;
-                end
-            end
+                        next_pc = current_pc + dest_in; // Target is PC + value read from Rd (dest_in)
+                        branch_taken = 1'b1;
+                     end
+            5'b01010: begin // brr L <-- CORRECTED: Handled here
+                        next_pc = current_pc + immediate; // Target is PC + sign-extended immediate
+                        branch_taken = 1'b1;
+                     end
+
+             // Conditional Branches
+            5'b01011: begin // brnz $rd, $rs <-- CORRECTED: Handled here
+                        if (branch_condition_met) begin   // Check if Rs (src_in1) != 0
+                            next_pc = dest_in;          // Target is value read from Rd (dest_in)
+                            branch_taken = 1'b1;
+                        end // else: branch not taken, defaults (PC+4, branch_taken=0) apply
+                     end
             5'b01110: begin // brgt $rd, $rs, $rt
-                if (branch_condition_met) begin
-                    next_pc = dest_in;
-                    branch_taken = 1'b1;
-                end
-            end
+                        if (branch_condition_met) begin   // Check if Rs (src_in1) > Rt (src_in2) signed
+                            next_pc = dest_in;          // Target is value read from Rd (dest_in)
+                            branch_taken = 1'b1;
+                        end // else: branch not taken, defaults (PC+4, branch_taken=0) apply
+                     end
+
+             // Default for non-branch instructions
             default: begin
-                // default next_pc and branch_taken already set above
-            end
+                        // Keep defaults: next_pc = current_pc + 4; branch_taken = 0;
+                     end
         endcase
     end
 endmodule
-
 
 
 // Modified Memory Handler (Using always @(*))
