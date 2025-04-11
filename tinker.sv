@@ -446,36 +446,35 @@ endmodule
 
 // Instruction Decoder
 //make the rs equal to rd
-// Instruction Decoder (Modified for ADDI/SUBI operand mapping)
+
+// Instruction Decoder (Modified for ADDI/SUBI src1 mapping)
 module inst_decoder (
     input logic [31:0] instruction,
     output logic [63:0] imm,
-    output logic [4:0] dest,         // Now conditionally assigned
-    output logic [4:0] src1,         // Now conditionally assigned
-    output logic [4:0] src2,         // Assigned normally, unused by ADDI/SUBI path
+    output logic [4:0] dest,         // Destination register address output
+    output logic [4:0] src1,         // Source register 1 address output (modified for addi/subi)
+    output logic [4:0] src2,         // Source register 2 address output
     output logic [4:0] opcode
 );
     logic [11:0] imm_raw;
-    logic [4:0] opcode_internal; // Use internal signal to read opcode once
+    logic [4:0] opcode_internal; // Internal wire for opcode
 
-    // Decode fields that are always the same position
+    // Decode fields that don't change based on opcode
     assign imm_raw = instruction[11:0];
     assign opcode_internal = instruction[31:27];
     assign opcode = opcode_internal; // Assign to output port
     assign imm = {{52{imm_raw[11]}}, imm_raw}; // Sign extend immediate
     assign src2 = instruction[16:12];          // Assign src2 field normally
+    assign dest = instruction[26:22];          // Destination register is always field [26:22]
 
-    // Determine src1 and dest based on opcode
+    // Determine src1 based on opcode using procedural assignment
     always @(*) begin
-        // Default mapping (covers R-type and potentially other common types)
-        // Default: Destination is [26:22], Source1 is [21:17]
-        dest = instruction[26:22];
+        // Default mapping: src1 normally comes from field [21:17]
         src1 = instruction[21:17];
 
-        // Override mapping specifically for ADDI (11001) and SUBI (11011)
+        // Override for ADDI (11001) and SUBI (11011)
         if (opcode_internal == 5'b11001 || opcode_internal == 5'b11011) begin
-            // For ADDI/SUBI: Destination is [21:17], Source1 is [26:22]
-            dest = instruction[21:17];
+            // For ADDI/SUBI: Use the destination register field [26:22] as src1
             src1 = instruction[26:22];
         end
         // For all other opcodes, the default mapping applies.
