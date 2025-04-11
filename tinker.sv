@@ -351,47 +351,49 @@ module memory_unit (
     end
 endmodule
 
-// Modified Control Unit (Using always @(*))
 module control_unit (
-    input logic [4:0] operation,
-    input logic [63:0] dest_in,
-    input logic [63:0] src_in1,
-    input logic [63:0] src_in2,
-    input logic [63:0] immediate,
-    input logic [63:0] current_pc,
-    input logic [63:0] memory_data,
-    output logic [63:0] next_pc,
-    output logic is_branch,
-    output logic branch_taken
+    input wire [4:0] opcode,
+    input wire clk, reset,
+    input wire branch_taken,
+    output reg pc_write_enable,
+    output reg reg_write,
+    output reg [2:0] current_state, next_state
 );
-    logic branch_condition_met;
-    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110);
+    parameter S_FETCH = 3'd0, S_DECODE = 3'd1, S_EXECUTE = 3'd2, S_MEMORY = 3'd3, S_WRITEBACK = 3'd4;
 
-    always @(*) begin // Changed from always_comb
-        case(operation)
-            5'b01011: branch_condition_met = (src_in1 != 0);
-            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2));
-            default: branch_condition_met = 1'b1;
-        endcase
+    // State machine
+    always @(posedge clk or posedge reset) begin
+        if (reset) current_state <= S_FETCH;
+        else current_state <= next_state;
+    end
 
-        branch_taken = 1'b0;
-        next_pc = current_pc + 4;
-
-        case (operation)
-            5'b01000: begin next_pc = dest_in; branch_taken = 1'b1; end
-            5'b01100: begin next_pc = dest_in; branch_taken = 1'b1; end
-            5'b01101: begin next_pc = memory_data; branch_taken = 1'b1; end
-            5'b01001: begin next_pc = current_pc + dest_in; branch_taken = 1'b1; end
-            5'b01010: begin next_pc = current_pc + $signed(immediate); branch_taken = 1'b1; end
-            5'b01011: begin
-                if (branch_condition_met) begin next_pc = dest_in; branch_taken = 1'b1; end
-                else begin next_pc = current_pc + 4; branch_taken = 1'b0; end
+    // Next state and control signals
+    always @(*) begin
+        pc_write_enable = 1'b0;
+        reg_write = 1'b0;
+        case (current_state)
+            S_FETCH: next_state = S_DECODE;
+            S_DECODE: next_state = S_EXECUTE;
+            S_EXECUTE: begin
+                if (opcode >= 5'b01000 && opcode <= 5'b01110) // Branch
+                    next_state = branch_taken ? S_FETCH : S_WRITEBACK;
+                else if (opcode == 5'b10000 || opcode == 5'b10011) // Memory
+                    next_state = S_MEMORY;
+                else begin // Arithmetic: addi, subi, etc.
+                    next_state = S_WRITEBACK;
+                    pc_write_enable = 1'b1; // Update PC for non-branch
+                end
             end
-            5'b01110: begin
-                if (branch_condition_met) begin next_pc = dest_in; branch_taken = 1'b1; end
-                else begin next_pc = current_pc + 4; branch_taken = 1'b0; end
+            S_MEMORY: begin
+                next_state = S_WRITEBACK;
+                pc_write_enable = 1'b1;
             end
-            default: begin next_pc = current_pc + 4; branch_taken = 1'b0; end // Ensure default handles non-branch case
+            S_WRITEBACK: begin
+                next_state = S_FETCH;
+                if (opcode != 5'b10011 && !(opcode >= 5'b01000 && opcode <= 5'b01110)) // Not store or branch
+                    reg_write = 1'b1;
+            end
+            default: next_state = S_FETCH;
         endcase
     end
 endmodule
@@ -488,20 +490,19 @@ endmodule
 
 // Instruction Decoder (No always blocks, Unchanged)
 module inst_decoder (
-    input logic [31:0] instruction,
-    output logic [63:0] imm,
-    output logic [4:0] dest,
-    output logic [4:0] src1,
-    output logic [4:0] src2,
-    output logic [4:0] opcode
+    input wire [31:0] instruction,
+    output reg [4:0] opcode,
+    output reg [4:0] rs1, rd,
+    output reg [63:0] imm
 );
-    logic [11:0] imm_raw;
-    assign imm_raw = instruction[11:0];
-    assign opcode = instruction[31:27];
-    assign dest = instruction[26:22];
-    assign src1 = instruction[21:17];
-    assign src2 = instruction[16:12];
-    assign imm = {{52{imm_raw[11]}}, imm_raw};
+    wire [11:0] imm_raw;
+    assign imm_raw = instruction[11:0]; // Extract 12-bit immediate
+    assign imm = {{52{imm_raw[11]}}, imm_raw}; // Sign-extend to 64 bits
+    always @(*) begin
+        opcode = instruction[31:27]; // Assuming 5-bit opcode at top
+        rs1 = instruction[26:22];    // Source register
+        rd = instruction[21:17];     // Destination register
+    end
 endmodule
 
 // Register/Literal Mux (Using always @(*))
