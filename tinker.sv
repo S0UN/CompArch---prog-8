@@ -99,35 +99,31 @@ module tinker_core (
             default:     next_state = S_FETCH;
         endcase
     end
-
-    // --- Control Signals based on State ---
-    always @(*) begin
+always @(*) begin // Control Signals block
         // --- Default values MUST be assigned FIRST ---
-        ir_write = 1'b0;            // Variable assignment
-        pc_write_enable = 1'b0;   // Variable assignment
-        reg_write = 1'b0;         // Variable assignment
-        mem_read = 1'b0;          // Variable assignment
-        mem_write = 1'b0;         // Variable assignment
-        mem_to_reg = 1'b0;        // Variable assignment
-        hlt = 1'b0;               // Variable assignment (driving output port)
-        memory_unit_address = mem_addr; // Default memory address
+        ir_write = 1'b0;
+        pc_write_enable = 1'b0;   // Default OFF
+        reg_write = 1'b0;         // Default OFF
+        mem_read = 1'b0;
+        mem_write = 1'b0;
+        mem_to_reg = 1'b0;        // Default from ALU
+        hlt = 1'b0;
+        memory_unit_address = mem_addr;
 
-        // --- Logic based on state ---
         case (current_state)
-            S_FETCH: begin
+            S_FETCH: begin // OK
                 ir_write = 1'b1;
                 mem_read = 1'b1;
                 memory_unit_address = pc_current;
             end
-            S_DECODE: begin
-                // No control signals asserted by FSM
+            S_DECODE: begin // OK
             end
-            S_EXECUTE: begin
+            S_EXECUTE: begin // OK?
                 if (is_branch_instr && branch_taken) begin
-                    pc_write_enable = 1'b1;
+                    pc_write_enable = 1'b1; // PC update for taken branch
                 end
             end
-            S_MEMORY: begin
+            S_MEMORY: begin // OK?
                 if (is_load_operation(opcode)) begin
                     mem_read = 1'b1;
                 end else if (is_store_operation(opcode)) begin
@@ -135,24 +131,25 @@ module tinker_core (
                 end
             end
             S_WRITEBACK: begin
+                // REG WRITE ENABLE
                 if (!is_store_operation(opcode) && !is_branch_no_writeback(opcode) && opcode != HALT_OPCODE) begin
-                    reg_write = 1'b1;
+                    reg_write = 1'b1; // Should be TRUE for ADD/AND
                 end
+                // WRITEBACK SOURCE SELECT
                 if (is_load_operation(opcode)) begin
                     mem_to_reg = 1'b1;
                 end else begin
-                    mem_to_reg = 1'b0;
+                    mem_to_reg = 1'b0; // Should be TRUE for ADD/AND
                 end
-                if (!branch_taken) begin
-                    pc_write_enable = 1'b1;
+                // PC WRITE ENABLE (Sequential)
+                if (!branch_taken) begin // branch_taken should be FALSE for ADD/AND
+                    pc_write_enable = 1'b1; // Should be TRUE for ADD/AND
                 end
             end
-            S_HALTED: begin
+            S_HALTED: begin // OK
                 hlt = 1'b1;
-                // Ensure other actions are disabled (done by defaults above)
             end
-            default: begin
-                // Keep defaults
+            default: begin // OK
             end
         endcase
     end
@@ -172,27 +169,42 @@ module tinker_core (
          return (op >= 5'b01000 && op <= 5'b01110) || op == HALT_OPCODE;
     endfunction
 
-
-    // --- Datapath Components and Registers ---
-
     // Instruction Register
-    always @(posedge clk) begin
-        if (ir_write) begin
-            instr_reg <= instr_word; // instr_reg must be declared logic [31:0]
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            instr_reg <= 32'b0; // Reset to 0
+        end else if (ir_write) begin
+            instr_reg <= instr_word;
         end
     end
 
     // Memory Data Register
-    always @(posedge clk) begin
-        if (current_state == S_MEMORY && mem_read) begin
-             mem_data_reg <= mem_data_out; // mem_data_reg must be logic [63:0]
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            mem_data_reg <= 64'b0; // Reset to 0
+        end else if (current_state == S_MEMORY && mem_read) begin
+             mem_data_reg <= mem_data_out;
         end
     end
 
-    // ALU Output Register
-    always @(posedge clk) begin
-       if (current_state == S_EXECUTE) begin
-            alu_out_reg <= alu_output; // alu_out_reg must be logic [63:0]
+// ALU Output Register - Revised Latch Condition
+    always @(posedge clk or posedge reset) begin
+       if (reset) begin
+           alu_out_reg <= 64'b0; // Reset to 0
+       // Only latch ALU result in EXECUTE state for instructions that are expected
+       // to write back the ALU result later. This prevents latching during
+       // branches or memory operations where alu_output might be irrelevant or unstable.
+       end else if (current_state == S_EXECUTE) begin
+           // Check if the instruction type typically writes back from ALU
+           // (This excludes stores, branches, jumps, call, return, halt)
+           // Essentially, is it an R-type or I-type ALU op or mov?
+           // We can approximate this by checking if reg_write would be enabled later
+           // (excluding the load case where mem_to_reg is high)
+           // Simpler: Check if it's NOT a memory op AND NOT a branch/jump/call/ret/halt
+           if (!is_memory_operation(opcode) && !is_branch_no_writeback(opcode)) begin
+               alu_out_reg <= alu_output;
+           end
+           // Otherwise, alu_out_reg holds its previous value.
        end
     end
 
