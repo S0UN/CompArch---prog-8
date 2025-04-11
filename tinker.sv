@@ -461,15 +461,15 @@ module reg_file_bank (
     assign data2 = registers[addr2];
     assign data_dest = registers[write_addr];
     assign stack = registers[31];
-
-    always @(posedge clk or posedge reset) begin
-        if (reset) begin
-            for (i = 0; i < 31; i = i + 1) begin registers[i] <= 64'h0; end
-            registers[31] <= MEMSIZE;
-        end else if (write_en) begin
-            registers[write_addr] <= write_data;
-        end
-    end
+	always @(posedge clk or posedge reset) begin
+		if (reset) begin
+			for (i = 0; i <= 31; i = i + 1) begin // Include all 32 registers
+				registers[i] <= (i == 31) ? MEMSIZE : 64'h0;
+			end
+		end else if (write_en) begin // Remove write_addr != 0 check
+			registers[write_addr] <= write_data;
+		end
+	end
 endmodule
 
 module alu_unit (
@@ -494,8 +494,8 @@ module alu_unit (
             5'b00011: out = ~in1;
             5'b00100: out = in1 >> in2;
             5'b00101: out = $signed(in1) >>> in2[5:0];  // shftri
-            5'b00110: out = in1 << in2;
-            5'b00111: out = in1 << in2[5:0];            // shftli
+			5'b00100: out = in1 >> in2[5:0]; // SHFTR
+			5'b00110: out = in1 << in2[5:0]; // SHFTL
             5'b10001: out = in1;
             5'b10010: out = (in1 & 64'h000FFFFFFFFFFFFF) | ((in2 & 64'hFFF) << 52);
             default: out = 64'h0;
