@@ -351,61 +351,77 @@ module memory_unit (
         end
     end
 endmodule
-
 module control_unit (
     input logic [4:0] operation,
-    input logic [63:0] dest_in,
-    input logic [63:0] src_in1,
-    input logic [63:0] src_in2,
-    input logic [63:0] immediate,
-    input logic [63:0] current_pc,
-    input logic [63:0] memory_data,
-    output logic [63:0] next_pc,
-    output logic is_branch,
-    output logic branch_taken
+    input logic [63:0] dest_in,     // Value of Rd register (used as target addr for br, brnz, brgt, call; offset for brr rd)
+    input logic [63:0] src_in1,     // Value of Rs1/Rs register (used for conditions brnz, brgt)
+    input logic [63:0] src_in2,     // Value of Rs2/Rt register (used for condition brgt)
+    input logic [63:0] immediate,   // Decoded immediate (sign-extended, used for brr L)
+    input logic [63:0] current_pc,  // Current PC value from fetch stage
+    input logic [63:0] memory_data, // Data read from stack for return instruction
+    output logic [63:0] next_pc,    // Calculated address for next instruction
+    output logic is_branch,         // Signal indicating instruction might alter PC flow
+    output logic branch_taken       // Signal indicating PC is not PC+4
 );
-    // Mark only real branch opcodes as branches.
-    assign is_branch = (operation == 5'b01000 ||
-                        operation == 5'b01001 ||
-                        operation == 5'b01100 ||
-                        operation == 5'b01101 ||
-                        operation == 5'b01110); // Excludes 5'b01010 & 5'b01011
+    logic branch_condition_met;
 
-    always @(*) begin // Changed from always_comb
-        // Default: sequential PC update
-        next_pc = current_pc + 4;
-        branch_taken = 1'b0;
+    // Identify ALL branch/jump/call/ret types correctly
+    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110); // Opcodes 0x8 to 0xE inclusive
+
+    always @(*) begin
+        // Determine if condition is met (only relevant for conditional branches)
+        case(operation)
+            5'b01011: branch_condition_met = (src_in1 != 0); // brnz condition check: is Rs != 0 ? (Rs mapped to src_in1)
+            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2)); // brgt condition check: is Rs > Rt (signed)?
+            default: branch_condition_met = 1'b1; // Assume true (condition met or irrelevant) for others
+        endcase
+
+        // Determine next PC value and if branch is effectively taken
+        branch_taken = 1'b0;        // Default: branch not taken
+        next_pc = current_pc + 4; // Default: next PC is sequential
+
         case (operation)
-            5'b01000: begin 
-                        next_pc = dest_in; 
-                        branch_taken = 1'b1; 
+            // Unconditional Jumps / Call / Ret
+            5'b01000: begin // br $rd
+                        next_pc = dest_in;          // Target address is the value read from Rd (dest_in)
+                        branch_taken = 1'b1;
                      end
-            5'b01001: begin 
-                        next_pc = current_pc + dest_in; 
-                        branch_taken = 1'b1; 
+            5'b01100: begin // call $rd
+                        next_pc = dest_in;          // Target address is the value read from Rd (dest_in)
+                        branch_taken = 1'b1;
                      end
-            5'b01100: begin 
-                        next_pc = dest_in; 
-                        branch_taken = 1'b1; 
+            5'b01101: begin // return
+                        next_pc = memory_data;      // Target address is read from memory (stack)
+                        branch_taken = 1'b1;
                      end
-            5'b01101: begin 
-                        next_pc = memory_data; 
-                        branch_taken = 1'b1; 
+
+             // Relative Jumps
+            5'b01001: begin // brr $rd
+                        next_pc = current_pc + dest_in; // Target is PC + value read from Rd (dest_in)
+                        branch_taken = 1'b1;
                      end
-            5'b01110: begin
-                        // You can add any branch condition here
-                        if ($signed(src_in1) > $signed(src_in2)) begin 
-                            next_pc = dest_in; 
-                            branch_taken = 1'b1; 
-                        end else begin 
-                            next_pc = current_pc + 4; 
-                            branch_taken = 1'b0; 
-                        end
+            5'b01010: begin // brr L <-- CORRECTED: Handled here
+                        next_pc = current_pc + immediate; // Target is PC + sign-extended immediate
+                        branch_taken = 1'b1;
                      end
-            // For 5'b01010 (addi) and 5'b01011 (subi) no branch behavior
-            default: begin 
-                        next_pc = current_pc + 4; 
-                        branch_taken = 1'b0; 
+
+             // Conditional Branches
+            5'b01011: begin // brnz $rd, $rs <-- CORRECTED: Handled here
+                        if (branch_condition_met) begin   // Check if Rs (src_in1) != 0
+                            next_pc = dest_in;          // Target is value read from Rd (dest_in)
+                            branch_taken = 1'b1;
+                        end // else: branch not taken, defaults (PC+4, branch_taken=0) apply
+                     end
+            5'b01110: begin // brgt $rd, $rs, $rt
+                        if (branch_condition_met) begin   // Check if Rs (src_in1) > Rt (src_in2) signed
+                            next_pc = dest_in;          // Target is value read from Rd (dest_in)
+                            branch_taken = 1'b1;
+                        end // else: branch not taken, defaults (PC+4, branch_taken=0) apply
+                     end
+
+             // Default for non-branch instructions
+            default: begin
+                        // Keep defaults: next_pc = current_pc + 4; branch_taken = 0;
                      end
         endcase
     end
@@ -477,14 +493,14 @@ module alu_unit (
     input logic [63:0] in2,
     output logic [63:0] out
 );
-    always @(*) begin // Changed from always_comb
+    always @(*) begin
         case (ctrl)
             5'b11000: out = in1 + in2;         // add
-            5'b11001: out = in1 + in2;         // addi (Op1)
-            5'b01010: out = in1 + in2;         // ADDI (Op2)
+            5'b11001: out = in1 + in2;         // addi (Opcode 0x19)
+            // 5'b01010: // REMOVED - Belongs in control_unit (brr L)
             5'b11010: out = in1 - in2;         // sub
-            5'b11011: out = in1 - in2;         // subi (Op1)
-            5'b01011: out = in1 - in2;         // SUBI (Op2)
+            5'b11011: out = in1 - in2;         // subi (Opcode 0x1B)
+            // 5'b01011: // REMOVED - Belongs in control_unit (brnz)
             5'b11100: out = in1 * in2;         // mul
             5'b11101: out = (in2 == 0) ? 64'h0 : in1 / in2; // div
             5'b00000: out = in1 & in2;         // and
