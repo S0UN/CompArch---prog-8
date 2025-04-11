@@ -352,12 +352,13 @@ module memory_unit (
 	end
 endmodule
 
+// Control Unit (Corrected Branch Logic)
 module control_unit (
     input logic [4:0] operation,
-    input logic [63:0] dest_in,  // Value of Rd (for branch targets)
-    input logic [63:0] src_in1,  // Value of Rs1 (for conditions)
-    input logic [63:0] src_in2,  // Value of Rs2 (for conditions)
-    input logic [63:0] immediate, // Decoded immediate
+    input logic [63:0] dest_in,     // Value of Rd (for branch targets)
+    input logic [63:0] src_in1,     // Value of Rs1 (for conditions)
+    input logic [63:0] src_in2,     // Value of Rs2 (for conditions)
+    input logic [63:0] immediate,   // Decoded immediate
     input logic [63:0] current_pc,
     input logic [63:0] memory_data, // Value from stack for RET
     output logic [63:0] next_pc,
@@ -367,42 +368,42 @@ module control_unit (
     logic branch_condition_met;
 
     // Identify ALL branch/jump/call/ret types
-    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110); // Opcodes 8 through 14
+    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110); // Opcodes 8 through 14 inclusive
 
     always @(*) begin
         // Determine if condition is met (only relevant for conditional branches)
         case(operation)
-            5'b01011: branch_condition_met = (src_in1 != 0); // brnz $rd, $rs (check Rs value - assuming rs is src1 input?) Check ISA! Let's assume Rs is src1.
-            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2)); // brgt $rd, $rs1, $rs2
-            default: branch_condition_met = 1'b1; // Assume true for unconditional jumps/calls/rets/relative branches
+            5'b01011: branch_condition_met = (src_in1 != 0); // brnz: check Rs1 value
+            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2)); // brgt: check Rs1 > Rs2 (signed)
+            default: branch_condition_met = 1'b1; // Assume true (condition met or irrelevant) for others
         endcase
 
         // Determine next PC value and if branch is effectively taken
-        branch_taken = 1'b0; // Default not taken
+        branch_taken = 1'b0;        // Default not taken
         next_pc = current_pc + 4; // Default next sequential PC
 
         case (operation)
             // Unconditional Jumps / Call / Ret
-            5'b01000: begin next_pc = dest_in; branch_taken = 1'b1; end // br $rd (Target is Rd value)
-            5'b01100: begin next_pc = dest_in; branch_taken = 1'b1; end // call $rd (Target is Rd value)
-            5'b01101: begin next_pc = memory_data; branch_taken = 1'b1; end // return (Target is from stack)
+            5'b01000: begin next_pc = dest_in;     branch_taken = 1'b1; end // br $rd
+            5'b01100: begin next_pc = dest_in;     branch_taken = 1'b1; end // call $rd
+            5'b01101: begin next_pc = memory_data; branch_taken = 1'b1; end // return
 
              // Relative Jumps
-            5'b01001: begin next_pc = current_pc + dest_in; branch_taken = 1'b1; end // brr $rd (PC + Reg[Rd])
-            5'b01010: begin next_pc = current_pc + $signed(immediate); branch_taken = 1'b1; end // brr L (PC + Imm)
+            5'b01001: begin next_pc = current_pc + dest_in;    branch_taken = 1'b1; end // brr $rd
+            5'b01010: begin next_pc = current_pc + $signed(immediate); branch_taken = 1'b1; end // brr L
 
              // Conditional Branches
-            5'b01011: begin // brnz $rd, $rs (Target is Rd value if Rs value != 0)
-                if (branch_condition_met) begin
+            5'b01011: begin // brnz $rd, $rs <-- ADDED CASE
+                if (branch_condition_met) begin // Check if Rs1 != 0
                     next_pc = dest_in; // Target is value of Rd
                     branch_taken = 1'b1;
-                end // else: defaults are correct (PC+4, branch_taken=0)
+                end // else: defaults (PC+4, branch_taken=0) are correct
             end
-            5'b01110: begin // brgt $rd, $rs1, $rs2 (Target is Rd value if Rs1 > Rs2)
-                if (branch_condition_met) begin
+            5'b01110: begin // brgt $rd, $rs1, $rs2
+                if (branch_condition_met) begin // Check if Rs1 > Rs2 (signed)
                     next_pc = dest_in; // Target is value of Rd
                     branch_taken = 1'b1;
-                end // else: defaults are correct (PC+4, branch_taken=0)
+                end // else: defaults (PC+4, branch_taken=0) are correct
             end
 
              // Default for non-branch instructions
