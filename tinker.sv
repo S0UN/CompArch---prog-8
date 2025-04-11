@@ -64,109 +64,133 @@ module tinker_core (
     // Unused Signals (as noted in original code) - Declare them anyway if needed to avoid implicit wires elsewhere
     // logic reg_dst, alu_src; // If truly unused, can omit, but declaring is safer.
 
-    // --- State Register ---
-    always @(posedge clk or posedge reset) begin
-        if (reset)
-            current_state <= S_FETCH;
-        else if (current_state == S_HALTED)
-             current_state <= S_HALTED;
-        else
-            current_state <= next_state;
-    end
-
-	always_ff @(posedge clk or posedge reset) begin
-    if (reset) begin
-        return_addr_reg <= 64'b0; // Reset the register
-    end else if (current_state == S_DECODE && opcode == 5'b01100) begin
-        return_addr_reg <= pc_current + 64'd4; // Latch PC + 4 for call
-    end
+	// --- State Register ---
+// This block updates the current state on every positive clock edge.
+always @(posedge clk or posedge reset) begin
+    if (reset)
+        current_state <= S_FETCH;
+    else if (current_state == S_HALTED)
+        current_state <= S_HALTED;
+    else
+        current_state <= next_state;  // next_state is computed combinationally
 end
 
-    // --- Next State Logic ---
-    always @(*) begin
-        // ... (logic as before, using direct enum assignments) ...
-        next_state = current_state; // Default: stay in current state
-        case (current_state)
-            S_FETCH:   next_state = S_DECODE;
-            S_DECODE: begin
-                if (opcode == HALT_OPCODE) begin
-                    next_state = S_HALTED;
-                end else begin
-                    next_state = S_EXECUTE;
-                end
+// --- Next State Logic ---
+// This combinational block computes what the next state should be,
+// based on the current state and signals such as opcode and branch_taken.
+always @(*) begin
+    next_state = current_state;  // Default: remain in the current state
+    case (current_state)
+        S_FETCH: begin
+            // After fetch, always decode the instruction.
+            next_state = S_DECODE;
+        end
+        S_DECODE: begin
+            // If the instruction is HALT, then go to S_HALTED;
+            // otherwise, proceed to execution.
+            if (opcode == HALT_OPCODE)
+                next_state = S_HALTED;
+            else
+                next_state = S_EXECUTE;
+        end
+        S_EXECUTE: begin
+            if (is_memory_operation(opcode)) begin
+                next_state = S_MEMORY;
             end
-            S_EXECUTE: begin
-                 if (is_memory_operation(opcode)) begin
-                     next_state = S_MEMORY;
-                 end else if (is_branch_instr)  begin
-                     next_state = S_FETCH;
-                 end else begin
-                     next_state = S_WRITEBACK;
-                 end
+            else if (is_branch_instr) begin
+                // If the instruction is a branch (unconditional or conditional)
+                // then check if the branch is taken.
+                if (branch_taken)
+                    next_state = S_FETCH;    // For taken branches, jump immediately
+                else
+                    next_state = S_WRITEBACK; // For conditional branches not taken,
+                                              // go to writeback for sequential PC update.
             end
-            S_MEMORY:    next_state = S_WRITEBACK;
-            S_WRITEBACK: next_state = S_FETCH;
-            S_HALTED:    next_state = S_HALTED;
-            default:     next_state = S_FETCH;
-        endcase
-    end
-    always @(*) begin // CHANGE BACK TO THIS
-        // --- Default values MUST be assigned FIRST ---
-        ir_write = 1'b0;
-        pc_write_enable = 1'b0;
-        reg_write = 1'b0;
-        mem_read = 1'b0;
-        mem_write = 1'b0;
-        mem_to_reg = 1'b0;
-        hlt = 1'b0;
-        memory_unit_address = mem_addr;
+            else begin
+                next_state = S_WRITEBACK;
+            end
+        end
+        S_MEMORY: begin
+            // Memory stage always proceeds to writeback.
+            next_state = S_WRITEBACK;
+        end
+        S_WRITEBACK: begin
+            // After writeback, go back to fetch the next instruction.
+            next_state = S_FETCH;
+        end
+        S_HALTED: begin
+            // Once halted, remain in halted state.
+            next_state = S_HALTED;
+        end
+        default: begin
+            next_state = S_FETCH;
+        end
+    endcase
+end
 
-        case (current_state)
-            S_FETCH: begin // OK
-                ir_write = 1'b1;
-                mem_read = 1'b1;
-                memory_unit_address = pc_current;
-            end
-            S_DECODE: begin // OK
-            end
-            S_EXECUTE: begin // OK?
-                if (is_branch_instr && branch_taken && opcode != 5'b01101) begin
-                    pc_write_enable = 1'b1; // PC update for taken branch
-                end
-            end
-            S_MEMORY: begin // OK?
-                if (is_load_operation(opcode)) begin
-                    mem_read = 1'b1;
-                end else if (is_store_operation(opcode)) begin
-                    mem_write = 1'b1;
-                end
-            end
-            S_WRITEBACK: begin
-                // REG WRITE ENABLE
-                if (!is_store_operation(opcode) && !is_branch_no_writeback(opcode) && opcode != HALT_OPCODE) begin
-                    reg_write = 1'b1; // Should be TRUE for ADD/AND
-                end
-                // WRITEBACK SOURCE SELECT
-                if (is_load_operation(opcode)) begin
-                    mem_to_reg = 1'b1;
-                end else begin
-                    mem_to_reg = 1'b0; // Should be TRUE for ADD/AND
-                end
-                // PC WRITE ENABLE (Sequential)
-				if (opcode == 5'b01101) begin // Return: update PC with return address
+// --- Control Signal Logic ---
+// This combinational block sets the various control signals based on current_state.
+always @(*) begin
+    // Default values—ensure signals are not left unassigned.
+    ir_write           = 1'b0;
+    pc_write_enable    = 1'b0;
+    reg_write          = 1'b0;
+    mem_read           = 1'b0;
+    mem_write          = 1'b0;
+    mem_to_reg         = 1'b0;
+    hlt                = 1'b0;
+    memory_unit_address = mem_addr;  // Default: pass through mem_addr
+
+    case (current_state)
+        S_FETCH: begin
+            // In fetch state, read memory at the current PC and latch the instruction.
+            ir_write            = 1'b1;
+            mem_read            = 1'b1;
+            memory_unit_address = pc_current;
+        end
+        S_DECODE: begin
+            // Nothing special to assert in decode.
+        end
+        S_EXECUTE: begin
+            // In execute for branch instructions:
+            // For unconditional branches or conditional branches that are taken,
+            // assert pc_write_enable to update the PC.
+            if (is_branch_instr && branch_taken && opcode != 5'b01101) begin
                 pc_write_enable = 1'b1;
-           		end else if (!branch_taken) begin // branch_taken should be FALSE for ADD/AND
-                    pc_write_enable = 1'b1; // Should be TRUE for ADD/AND
-                end
-               
             end
-            S_HALTED: begin // OK
-                hlt = 1'b1;
-            end
-            default: begin // OK
-            end
-        endcase
-    end
+        end
+        S_MEMORY: begin
+            // For load instructions, assert mem_read;
+            // for store instructions, assert mem_write.
+            if (is_load_operation(opcode))
+                mem_read = 1'b1;
+            else if (is_store_operation(opcode))
+                mem_write = 1'b1;
+        end
+        S_WRITEBACK: begin
+            // Register write is enabled unless the operation is a store
+            // or a branch operation that requires no writeback or a halt.
+            if (!is_store_operation(opcode) && !is_branch_no_writeback(opcode) && opcode != HALT_OPCODE)
+                reg_write = 1'b1;
+            // Select the source for the writeback: memory data for loads, ALU result otherwise.
+            mem_to_reg = is_load_operation(opcode);
+            // For the PC update in writeback:
+            // For return instructions (opcode 01101), force PC update.
+            // For all other instructions that did not take a branch, update PC sequentially.
+            if (opcode == 5'b01101)
+                pc_write_enable = 1'b1;
+            else if (!branch_taken)
+                pc_write_enable = 1'b1;
+        end
+        S_HALTED: begin
+            hlt = 1'b1;
+        end
+        default: begin
+            // Default: nothing asserted.
+        end
+    endcase
+end
+
 
     // --- Helper Functions --- (Unchanged)
     // ... (functions as before) ...
