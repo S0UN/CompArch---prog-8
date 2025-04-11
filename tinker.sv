@@ -2,7 +2,7 @@
 module tinker_core (
     input logic clk,
     input logic reset,
-    output logic hlt
+    output logic hlt // Output signal
 );
     // --- Constants ---
     localparam HALT_OPCODE = 5'b11111;
@@ -12,49 +12,86 @@ module tinker_core (
         S_FETCH, S_DECODE, S_EXECUTE, S_MEMORY, S_WRITEBACK, S_HALTED
     } state_t;
 
-    // --- Internal Signal Declarations ---
+    // --- Internal Signal Declarations (GROUPED AND PLACED FIRST) ---
+
+    // State Variables (assigned in always blocks)
     state_t current_state, next_state;
-    logic [63:0] pc_current, pc_next;
-    logic pc_write_enable;
-    logic [31:0] instr_word, instr_reg;
-    logic [4:0] dest_reg, src_reg1, src_reg2, opcode;
-    logic [63:0] imm_value;
-    logic [63:0] dest_val, src_val1, src_val2, stack_ptr;
-    logic reg_write, mem_to_reg;
-    logic [63:0] alu_operand2, alu_output, alu_out_reg;
-    logic [63:0] mem_addr, mem_data_in, mem_data_out, mem_data_reg;
-    logic mem_read, mem_write, ir_write;
-    logic [63:0] memory_unit_address;
-    logic is_branch_instr, branch_taken;
+
+    // PC Signals
+    logic [63:0] pc_current;        // Output from fetch_unit
+    logic [63:0] pc_next;           // Output from control_unit, input to fetch_unit
+    logic        pc_write_enable;   // Control signal (assigned in always @(*))
+
+    // Instruction Decode Signals
+    logic [31:0] instr_word;        // Output from memory_unit (instruction port)
+    logic [31:0] instr_reg;         // Latched instruction (assigned in always @(posedge clk))
+    logic [4:0]  dest_reg;          // Output from inst_decoder
+    logic [4:0]  src_reg1;          // Output from inst_decoder
+    logic [4:0]  src_reg2;          // Output from inst_decoder
+    logic [4:0]  opcode;            // Output from inst_decoder
+    logic [63:0] imm_value;         // Output from inst_decoder
+
+    // Register File Signals
+    logic [63:0] dest_val;          // Output from reg_file (data_dest port)
+    logic [63:0] src_val1;          // Output from reg_file (data1 port)
+    logic [63:0] src_val2;          // Output from reg_file (data2 port)
+    logic [63:0] stack_ptr;         // Output from reg_file (stack port)
+    logic        reg_write;         // Control signal (assigned in always @(*))
+    logic        mem_to_reg;        // Control signal (assigned in always @(*))
+
+    // ALU Signals
+    logic [63:0] alu_operand2;      // Output from reg_lit_mux
+    logic [63:0] alu_output;        // Output from alu_unit
+    logic [63:0] alu_out_reg;       // Latched ALU output (assigned in always @(posedge clk))
+
+    // Memory Access Signals
+    logic [63:0] mem_addr;          // Output from mem_handler (addr_out port)
+    logic [63:0] mem_data_in;       // Output from mem_handler (data_out port), input to memory_unit
+    logic [63:0] mem_data_out;      // Output from memory_unit (data_out port)
+    logic [63:0] mem_data_reg;      // Latched memory data (assigned in always @(posedge clk))
+    logic        mem_read;          // Control signal (assigned in always @(*))
+    logic        mem_write;         // Control signal (assigned in always @(*))
+    logic        ir_write;          // Control signal (assigned in always @(*))
+    logic [63:0] memory_unit_address; // Intermediate signal for memory address (assigned in always @(*))
+
+    // Control/Branch Signals
+    logic        is_branch_instr;   // Output from control_unit
+    logic        branch_taken;      // Output from control_unit
+
+    // Unused Signals (as noted in original code) - Declare them anyway if needed to avoid implicit wires elsewhere
+    // logic reg_dst, alu_src; // If truly unused, can omit, but declaring is safer.
 
     // --- State Register ---
     always @(posedge clk or posedge reset) begin
         if (reset)
             current_state <= S_FETCH;
         else if (current_state == S_HALTED)
-            current_state <= S_HALTED;
+             current_state <= S_HALTED;
         else
             current_state <= next_state;
     end
 
     // --- Next State Logic ---
     always @(*) begin
-        next_state = current_state;
+        // ... (logic as before, using direct enum assignments) ...
+        next_state = current_state; // Default: stay in current state
         case (current_state)
             S_FETCH:   next_state = S_DECODE;
             S_DECODE: begin
-                if (opcode == HALT_OPCODE)
+                if (opcode == HALT_OPCODE) begin
                     next_state = S_HALTED;
-                else
+                end else begin
                     next_state = S_EXECUTE;
+                end
             end
             S_EXECUTE: begin
-                if (is_memory_operation(opcode))
-                    next_state = S_MEMORY;
-                else if (is_branch_instr)
-                    next_state = S_FETCH;
-                else
-                    next_state = S_WRITEBACK;
+                 if (is_memory_operation(opcode)) begin
+                     next_state = S_MEMORY;
+                 end else if (is_branch_instr) begin
+                     next_state = S_FETCH;
+                 end else begin
+                     next_state = S_WRITEBACK;
+                 end
             end
             S_MEMORY:    next_state = S_WRITEBACK;
             S_WRITEBACK: next_state = S_FETCH;
@@ -62,9 +99,8 @@ module tinker_core (
             default:     next_state = S_FETCH;
         endcase
     end
-
-    // --- Control Signals ---
-    always @(*) begin
+    always @(*) begin // CHANGE BACK TO THIS
+        // --- Default values MUST be assigned FIRST ---
         ir_write = 1'b0;
         pc_write_enable = 1'b0;
         reg_write = 1'b0;
@@ -75,169 +111,175 @@ module tinker_core (
         memory_unit_address = mem_addr;
 
         case (current_state)
-            S_FETCH: begin
+            S_FETCH: begin // OK
                 ir_write = 1'b1;
                 mem_read = 1'b1;
                 memory_unit_address = pc_current;
             end
-            S_DECODE: begin
+            S_DECODE: begin // OK
             end
-            S_EXECUTE: begin
+            S_EXECUTE: begin // OK?
                 if (is_branch_instr && branch_taken) begin
-                    pc_write_enable = 1'b1;
-                end else if (!is_memory_operation(opcode) && !is_branch_instr) begin
-                    pc_write_enable = 1'b1;
+                    pc_write_enable = 1'b1; // PC update for taken branch
                 end
             end
-            S_MEMORY: begin
+            S_MEMORY: begin // OK?
                 if (is_load_operation(opcode)) begin
                     mem_read = 1'b1;
                 end else if (is_store_operation(opcode)) begin
                     mem_write = 1'b1;
                 end
-                pc_write_enable = 1'b1;
             end
             S_WRITEBACK: begin
+                // REG WRITE ENABLE
                 if (!is_store_operation(opcode) && !is_branch_no_writeback(opcode) && opcode != HALT_OPCODE) begin
-                    reg_write = 1'b1;
+                    reg_write = 1'b1; // Should be TRUE for ADD/AND
                 end
+                // WRITEBACK SOURCE SELECT
                 if (is_load_operation(opcode)) begin
                     mem_to_reg = 1'b1;
                 end else begin
-                    mem_to_reg = 1'b0;
+                    mem_to_reg = 1'b0; // Should be TRUE for ADD/AND
                 end
-                if (!branch_taken) begin
-                    pc_write_enable = 1'b1;
+                // PC WRITE ENABLE (Sequential)
+                if (!branch_taken) begin // branch_taken should be FALSE for ADD/AND
+                    pc_write_enable = 1'b1; // Should be TRUE for ADD/AND
                 end
             end
-            S_HALTED: begin
+            S_HALTED: begin // OK
                 hlt = 1'b1;
             end
-            default: begin
+            default: begin // OK
             end
         endcase
     end
 
-    // --- Helper Functions ---
+    // --- Helper Functions --- (Unchanged)
+    // ... (functions as before) ...
     function logic is_memory_operation(logic [4:0] op);
-        return (op == 5'b10000 || op == 5'b10011 || op == 5'b01100 || op == 5'b01101);
+         return (op == 5'b10000 || op == 5'b10011 || op == 5'b01100 || op == 5'b01101);
     endfunction
     function logic is_load_operation(logic [4:0] op);
-        return (op == 5'b10000 || op == 5'b01101);
+         return (op == 5'b10000 || op == 5'b01101); // Load/Ret
     endfunction
     function logic is_store_operation(logic [4:0] op);
-        return (op == 5'b10011 || op == 5'b01100);
+        return (op == 5'b10011 || op == 5'b01100); // Store/Call
     endfunction
     function logic is_branch_no_writeback(logic [4:0] op);
-        return (op >= 5'b01000 && op <= 5'b01110) || op == HALT_OPCODE;
+         return (op >= 5'b01000 && op <= 5'b01110) || op == HALT_OPCODE;
     endfunction
 
-    // --- Instruction Register ---
+    // Instruction Register
     always @(posedge clk or posedge reset) begin
-        if (reset)
-            instr_reg <= 32'b0;
-        else if (ir_write)
+        if (reset) begin
+            instr_reg <= 32'b0; // Reset to 0
+        end else if (ir_write) begin
             instr_reg <= instr_word;
+        end
     end
 
-    // --- Memory Data Register ---
+    // Memory Data Register
     always @(posedge clk or posedge reset) begin
-        if (reset)
-            mem_data_reg <= 64'b0;
-        else if (current_state == S_MEMORY && mem_read)
-            mem_data_reg <= mem_data_out;
+        if (reset) begin
+            mem_data_reg <= 64'b0; // Reset to 0
+        end else if (current_state == S_MEMORY && mem_read) begin
+             mem_data_reg <= mem_data_out;
+        end
     end
 
-    // --- ALU Output Register ---
+// ALU Output Register - Revert to simpler latch condition
     always @(posedge clk or posedge reset) begin
-        if (reset)
-            alu_out_reg <= 64'b0;
-        else if (current_state == S_EXECUTE)
+       if (reset) begin
+           alu_out_reg <= 64'b0; // Reset to 0
+       end else if (current_state == S_EXECUTE) begin // Latch whenever in EXECUTE state
             alu_out_reg <= alu_output;
+       end
     end
 
-    // --- Instantiations ---
+    // --- Instantiations --- (Connections should now match declared signal widths)
     fetch_unit fetch (
         .clk(clk),
         .reset(reset),
-        .pc_in(pc_next),
-        .pc_out(pc_current),
-        .pc_write(pc_write_enable)
+        .pc_in(pc_next),           // Should be logic [63:0]
+        .pc_out(pc_current),       // Should be logic [63:0]
+        .pc_write(pc_write_enable) // Should be logic
     );
 
     memory_unit memory (
-        .program_counter(pc_current),
+        .program_counter(pc_current),  // Should be logic [63:0]
         .clk(clk),
         .reset(reset),
-        .read_en(mem_read),
-        .write_en(mem_write),
-        .data_in(mem_data_in),
-        .address(memory_unit_address),
-        .data_out(mem_data_out),
-        .instruction(instr_word)
+        .read_en(mem_read),            // Should be logic
+        .write_en(mem_write),          // Should be logic
+        .data_in(mem_data_in),         // Should be logic [63:0]
+        .address(memory_unit_address), // Should be logic [63:0]
+        .data_out(mem_data_out),       // Should be logic [63:0]
+        .instruction(instr_word)       // Should be logic [31:0]
     );
 
     control_unit ctrl (
-        .operation(opcode),
-        .dest_in(dest_val),
-        .src_in1(src_val1),
-        .src_in2(src_val2),
-        .immediate(imm_value),
-        .current_pc(pc_current),
-        .memory_data(mem_data_reg),
-        .next_pc(pc_next),
-        .is_branch(is_branch_instr),
-        .branch_taken(branch_taken)
+        .operation(opcode),            // Should be logic [4:0]
+        .dest_in(dest_val),            // Should be logic [63:0]
+        .src_in1(src_val1),            // Should be logic [63:0]
+        .src_in2(src_val2),            // Should be logic [63:0]
+        .immediate(imm_value),         // Should be logic [63:0]
+        .current_pc(pc_current),       // Should be logic [63:0]
+        .memory_data(mem_data_reg),    // Should be logic [63:0]
+        .next_pc(pc_next),             // Should be logic [63:0]
+        .is_branch(is_branch_instr),   // Should be logic
+        .branch_taken(branch_taken)    // Should be logic
     );
 
     mem_handler mem_mgr (
-        .op(opcode),
-        .dest(dest_val),
-        .src(src_val1),
-        .imm(imm_value),
-        .pc(pc_current),
-        .r31(stack_ptr),
-        .addr_out(mem_addr),
-        .data_out(mem_data_in)
+        .op(opcode),                   // Should be logic [4:0]
+        .dest(dest_val),               // Should be logic [63:0]
+        .src(src_val1),                // Should be logic [63:0]
+        .imm(imm_value),               // Should be logic [63:0]
+        .pc(pc_current),               // Should be logic [63:0]
+        .r31(stack_ptr),               // Should be logic [63:0]
+        .addr_out(mem_addr),           // Should be logic [63:0]
+        .data_out(mem_data_in)         // Should be logic [63:0]
     );
 
     inst_decoder dec (
-        .instruction(instr_reg),
-        .imm(imm_value),
-        .dest(dest_reg),
-        .src1(src_reg1),
-        .src2(src_reg2),
-        .opcode(opcode)
+        .instruction(instr_reg),       // Should be logic [31:0]
+        .imm(imm_value),               // Should be logic [63:0]
+        .dest(dest_reg),               // Should be logic [4:0]
+        .src1(src_reg1),               // Should be logic [4:0]
+        .src2(src_reg2),               // Should be logic [4:0]
+        .opcode(opcode)                // Should be logic [4:0]
     );
 
     reg_file_bank reg_file (
         .clk(clk),
         .reset(reset),
-        .write_en(reg_write),
-        .write_data(mem_to_reg ? mem_data_reg : alu_out_reg),
-        .addr1(src_reg1),
-        .addr2(src_reg2),
-        .write_addr(dest_reg),
-        .data1(src_val1),
-        .data2(src_val2),
-        .data_dest(dest_val),
-        .stack(stack_ptr)
+        .write_en(reg_write),         // Should be logic
+        .write_data(mem_to_reg ? mem_data_reg : alu_out_reg), // Input data width check
+        .addr1(src_reg1),             // Should be logic [4:0]
+        .addr2(src_reg2),             // Should be logic [4:0]
+        .write_addr(dest_reg),        // Should be logic [4:0]
+        .data1(src_val1),             // Should be logic [63:0]
+        .data2(src_val2),             // Should be logic [63:0]
+        .data_dest(dest_val),         // Should be logic [63:0]
+        .stack(stack_ptr)             // Should be logic [63:0]
     );
 
     reg_lit_mux mux (
-        .op(opcode),
-        .reg_val(src_val2),
-        .lit_val(imm_value),
-        .out(alu_operand2)
+        .op(opcode),                   // Should be logic [4:0]
+        .reg_val(src_val2),            // Should be logic [63:0]
+        .lit_val(imm_value),           // Should be logic [63:0]
+        .out(alu_operand2)             // Should be logic [63:0]
     );
 
     alu_unit alu (
-        .ctrl(opcode),
-        .in1(src_val1),
-        .in2(alu_operand2),
-        .out(alu_output)
+        .ctrl(opcode),                 // Should be logic [4:0]
+        .in1(src_val1),                // Should be logic [63:0]
+        .in2(alu_operand2),            // Should be logic [63:0]
+        .out(alu_output)               // Should be logic [63:0]
     );
-endmodule
+
+endmodule // End of tinker_core
+
 
 //------------------------------------------------------------------------------
 // Supporting Modules (MUST ALSO BE MODIFIED for always_comb/always_ff)
@@ -321,37 +363,53 @@ module control_unit (
     output logic is_branch,
     output logic branch_taken
 );
-    logic branch_condition_met;
-    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110);
+    // Mark only real branch opcodes as branches.
+    assign is_branch = (operation == 5'b01000 ||
+                        operation == 5'b01001 ||
+                        operation == 5'b01100 ||
+                        operation == 5'b01101 ||
+                        operation == 5'b01110); // Excludes 5'b01010 & 5'b01011
 
-    always @(*) begin
-        case(operation)
-            5'b01011: branch_condition_met = (src_in1 != 0);
-            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2));
-            default: branch_condition_met = 1'b1;
-        endcase
-
-        branch_taken = 1'b0;
+    always @(*) begin // Changed from always_comb
+        // Default: sequential PC update
         next_pc = current_pc + 4;
-
+        branch_taken = 1'b0;
         case (operation)
-            5'b01000: begin next_pc = dest_in; branch_taken = 1'b1; end
-            5'b01100: begin next_pc = dest_in; branch_taken = 1'b1; end
-            5'b01101: begin next_pc = memory_data; branch_taken = 1'b1; end
-            5'b01001: begin next_pc = current_pc + dest_in; branch_taken = 1'b1; end
-            5'b01010: begin next_pc = current_pc + $signed(immediate); branch_taken = 1'b1; end
-            5'b01011: begin
-                if (branch_condition_met) begin next_pc = dest_in; branch_taken = 1'b1; end
-                else begin next_pc = current_pc + 4; branch_taken = 1'b0; end
-            end
+            5'b01000: begin 
+                        next_pc = dest_in; 
+                        branch_taken = 1'b1; 
+                     end
+            5'b01001: begin 
+                        next_pc = current_pc + dest_in; 
+                        branch_taken = 1'b1; 
+                     end
+            5'b01100: begin 
+                        next_pc = dest_in; 
+                        branch_taken = 1'b1; 
+                     end
+            5'b01101: begin 
+                        next_pc = memory_data; 
+                        branch_taken = 1'b1; 
+                     end
             5'b01110: begin
-                if (branch_condition_met) begin next_pc = dest_in; branch_taken = 1'b1; end
-                else begin next_pc = current_pc + 4; branch_taken = 1'b0; end
-            end
-            default: begin next_pc = current_pc + 4; branch_taken = 1'b0; end
+                        // You can add any branch condition here
+                        if ($signed(src_in1) > $signed(src_in2)) begin 
+                            next_pc = dest_in; 
+                            branch_taken = 1'b1; 
+                        end else begin 
+                            next_pc = current_pc + 4; 
+                            branch_taken = 1'b0; 
+                        end
+                     end
+            // For 5'b01010 (addi) and 5'b01011 (subi) no branch behavior
+            default: begin 
+                        next_pc = current_pc + 4; 
+                        branch_taken = 1'b0; 
+                     end
         endcase
     end
 endmodule
+
 
 // Modified Memory Handler (Using always @(*))
 module mem_handler (
@@ -412,7 +470,6 @@ module reg_file_bank (
     end
 endmodule
 
-// ALU Unit (Using always @(*))
 module alu_unit (
     input logic [4:0] ctrl,
     input logic [63:0] in1,
@@ -421,11 +478,12 @@ module alu_unit (
 );
     always @(*) begin // Changed from always_comb
         case (ctrl)
-            // ... cases remain the same ...
             5'b11000: out = in1 + in2;
             5'b11001: out = in1 + in2;
+            5'b01010: out = in1 + in2; // ADDI: add immediate
             5'b11010: out = in1 - in2;
             5'b11011: out = in1 - in2;
+            5'b01011: out = in1 - in2; // SUBI: subtract immediate
             5'b11100: out = in1 * in2;
             5'b11101: out = (in2 == 0) ? 64'h0 : in1 / in2;
             5'b00000: out = in1 & in2;
@@ -443,6 +501,7 @@ module alu_unit (
     end
 endmodule
 
+// Instruction Decoder (No always blocks, Unchanged)
 module inst_decoder (
     input logic [31:0] instruction,
     output logic [63:0] imm,
@@ -459,7 +518,6 @@ module inst_decoder (
     assign src2 = instruction[16:12];
     assign imm = {{52{imm_raw[11]}}, imm_raw};
 endmodule
-
 module reg_lit_mux (
     input logic [4:0] op,
     input logic [63:0] reg_val,
@@ -467,11 +525,11 @@ module reg_lit_mux (
     output logic [63:0] out
 );
     always @(*) begin
-        if (op == 5'b11001 || op == 5'b11011 || // addi, subi
+        if (op == 5'b11001 || op == 5'b11011 ||
             op == 5'b00101 || op == 5'b00111 ||
             op == 5'b10010 ||
             op == 5'b10000 || op == 5'b10011 ||
-            op == 5'b01010)
+            op == 5'b01010 || op == 5'b01011)
             out = lit_val;
         else
             out = reg_val;
