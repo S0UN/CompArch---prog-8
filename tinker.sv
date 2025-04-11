@@ -88,7 +88,7 @@ module tinker_core (
             S_EXECUTE: begin
                  if (is_memory_operation(opcode)) begin
                      next_state = S_MEMORY;
-                 end else if (is_branch_instr && branch_taken)  begin
+                 end else if (is_branch_instr)  begin
                      next_state = S_FETCH;
                  end else begin
                      next_state = S_WRITEBACK;
