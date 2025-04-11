@@ -5,61 +5,59 @@
 module tinker_core (
     input logic clk,
     input logic reset,
-    output logic hlt  // Output halt signal
+    output logic hlt
 );
-    // --- State Definition ---
+    // State Definition
     typedef enum logic [3:0] {
         S_FETCH,
         S_DECODE,
-        S_EXEC_ADDR,  // Address calc for Load/Store/Call/Return
-        S_EXEC_RTYPE, // R-Type ALU
-        S_EXEC_ITYPE, // I-Type ALU
-        S_EXEC_BRANCH,// Branch condition eval
-        S_EXEC_JUMP,  // Jump PC update
-        S_MEM_READ,   // Memory read (Load/Return)
-        S_MEM_WRITE,  // Memory write (Store/Call)
-        S_MEM_WB,     // Writeback from memory
-        S_ALU_WB,     // Writeback from ALU
-        S_HALT        // Halt state
+        S_EXEC_ADDR,
+        S_EXEC_RTYPE,
+        S_EXEC_ITYPE,
+        S_EXEC_BRANCH,
+        S_EXEC_JUMP,
+        S_MEM_READ,
+        S_MEM_WRITE,
+        S_MEM_WB,
+        S_ALU_WB,
+        S_HALT
     } StateType;
 
     StateType current_state, next_state;
 
-    // --- Datapath Registers ---
-    logic [63:0] pc;             // Program Counter
-    logic [31:0] ir;             // Instruction Register
-    logic [63:0] a, b;           // Register operands
-    logic [63:0] alu_out;        // ALU output
-    logic [63:0] mdr;            // Memory Data Register
-    logic [63:0] stack_ptr_reg;  // Stack pointer (R31)
+    // Datapath Registers
+    logic [63:0] pc;
+    logic [31:0] ir;
+    logic [63:0] a, b;
+    logic [63:0] alu_out;
+    logic [63:0] mdr;
+    logic [63:0] stack_ptr_reg;
 
-    // --- Decoded Instruction Fields ---
+    // Decoded Instruction Fields
     logic [4:0] opcode;
     logic [4:0] dest_reg;
     logic [4:0] src_reg1;
     logic [4:0] src_reg2;
     logic [63:0] immediate;
 
-    // --- Internal Wires ---
+    // Internal Wires
     logic [63:0] reg_read_data1, reg_read_data2, reg_write_data;
     logic [63:0] mem_read_data, mem_write_data;
     logic [63:0] alu_in1, alu_in2;
     logic [63:0] next_pc_select;
     logic [63:0] mem_addr_select;
 
-    // --- Control Signals ---
+    // Control Signals
     logic pc_write, ir_write, a_write, b_write, alu_out_write, mdr_write;
     logic reg_write, mem_write;
-    logic [1:0] pc_source;      // 0: PC+4, 1: ALUOut, 2: MDR, 3: A
-    logic [4:0] alu_op_select;  // Opcode or adjusted for PC+4
-    logic alu_src_a;            // 0: PC, 1: A
-    logic [1:0] alu_src_b;      // 0: B, 1: Imm, 2: 4, 3: 8
-    logic adr_source;           // 0: PC, 1: ALUOut
-    logic mem_to_reg;           // 0: ALUOut, 1: MDR
+    logic [1:0] pc_source;
+    logic [4:0] alu_op_select;
+    logic alu_src_a;
+    logic [1:0] alu_src_b;
+    logic adr_source;
+    logic mem_to_reg;
 
-    // --- Instantiate Functional Units ---
-
-    // ALU Unit
+    // Instantiate Functional Units
     logic alu_valid;
     alu_unit alu (
         .ctrl(alu_op_select),
@@ -70,11 +68,10 @@ module tinker_core (
     );
     logic [63:0] alu_out_internal;
 
-    // Register File
     reg_file_bank reg_file (
         .clk(clk),
         .reset(reset),
-        .mem_write_en(1'b0),  // Unified write enable
+        .mem_write_en(1'b0),
         .alu_write_en(reg_write),
         .write_data(reg_write_data),
         .addr1(src_reg1),
@@ -82,11 +79,10 @@ module tinker_core (
         .write_addr(dest_reg),
         .data1(reg_read_data1),
         .data2(reg_read_data2),
-        .data_dest(),  // Not used
+        .data_dest(),
         .stack(stack_ptr_reg)
     );
 
-    // Memory Unit
     memory_unit memory (
         .program_counter(pc),
         .clk(clk),
@@ -99,7 +95,6 @@ module tinker_core (
     );
     logic [31:0] ir_internal;
 
-    // Instruction Decoder
     inst_decoder dec (
         .instruction(ir),
         .imm(immediate),
@@ -109,26 +104,20 @@ module tinker_core (
         .opcode(opcode)
     );
 
-    // --- Datapath MUXes ---
-
-    // PC Source MUX
+    // Datapath MUXes
     always_comb begin
         case (pc_source)
-            2'b00: next_pc_select = pc + 4;  // PC+4
-            2'b01: next_pc_select = alu_out; // Branch/Jump target
-            2'b10: next_pc_select = mdr;     // Return address
-            2'b11: next_pc_select = a;       // Register jump
+            2'b00: next_pc_select = pc + 4;
+            2'b01: next_pc_select = alu_out;
+            2'b10: next_pc_select = mdr;
+            2'b11: next_pc_select = a;
             default: next_pc_select = pc + 4;
         endcase
     end
 
-    // Memory Address MUX
     assign mem_addr_select = adr_source ? alu_out : pc;
-
-    // ALU Input A MUX
     assign alu_in1 = alu_src_a ? a : pc;
 
-    // ALU Input B MUX
     always_comb begin
         case (alu_src_b)
             2'b00: alu_in2 = b;
@@ -139,13 +128,10 @@ module tinker_core (
         endcase
     end
 
-    // Register Write Data MUX
     assign reg_write_data = mem_to_reg ? mdr : alu_out;
+    assign mem_write_data = (opcode == 5'b01100) ? (pc + 4) : b;
 
-    // Memory Write Data
-    assign mem_write_data = (opcode == 5'b01100) ? (pc + 4) : b; // PC+4 for call, B for store
-
-    // --- State Register ---
+    // State Register
     always_ff @(posedge clk or posedge reset) begin
         if (reset)
             current_state <= S_FETCH;
@@ -153,9 +139,10 @@ module tinker_core (
             current_state <= next_state;
     end
 
-    // --- Datapath Register Updates ---
+    // Datapath Register Updates
     always_ff @(posedge clk) begin
-        if (pc_write) pc <= next_pc_select;
+        if (reset) pc <= 64'h2000;  // Initialize PC on reset
+        else if (pc_write) pc <= next_pc_select;
         if (ir_write) ir <= ir_internal;
         if (a_write) a <= reg_read_data1;
         if (b_write) b <= reg_read_data2;
@@ -163,30 +150,24 @@ module tinker_core (
         if (mdr_write) mdr <= mem_read_data;
     end
 
-    // --- FSM Next State Logic ---
+    // FSM Next State Logic
     always_comb begin
         next_state = current_state;
         case (current_state)
             S_FETCH: next_state = S_DECODE;
             S_DECODE: begin
                 case (opcode)
-                    // R-Type ALU
                     5'b11000, 5'b11010, 5'b11100, 5'b11101, // add, sub, mul, div
                     5'b00000, 5'b00001, 5'b00010, 5'b00011, // and, or, xor, not
-                    5'b00100, 5'b00110, 5'b10100, 5'b10101, // shftr, shftl, addf, subf
-                    5'b10110, 5'b10111, 5'b10001:           // mulf, divf, mov $r_d, $r_s
+                    5'b00100, 5'b00110, 5'b10001:           // shftr, shftl, mov $r_d, $r_s
                         next_state = S_EXEC_RTYPE;
-                    // I-Type ALU
                     5'b11001, 5'b11011, 5'b00101, 5'b00111, // addi, subi, shftri, shftli
                     5'b10010:                               // mov $r_d, L
                         next_state = S_EXEC_ITYPE;
-                    // Memory/Stack Ops
                     5'b10000, 5'b10011, 5'b01100, 5'b01101: // mov $r_d, ($r_s)(L), mov ($r_d)(L), $r_s, call, return
                         next_state = S_EXEC_ADDR;
-                    // Branches
                     5'b01011, 5'b01110:                     // brnz, brgt
                         next_state = S_EXEC_BRANCH;
-                    // Jumps
                     5'b01000, 5'b01001, 5'b01010:           // br, brr $r_d, brr L
                         next_state = S_EXEC_JUMP;
                     `HALT_OPCODE: next_state = S_HALT;
@@ -195,10 +176,10 @@ module tinker_core (
             end
             S_EXEC_ADDR: begin
                 case (opcode)
-                    5'b10000: next_state = S_MEM_READ;  // Load
-                    5'b10011: next_state = S_MEM_WRITE; // Store
-                    5'b01100: next_state = S_MEM_WRITE; // Call
-                    5'b01101: next_state = S_MEM_READ;  // Return
+                    5'b10000: next_state = S_MEM_READ;
+                    5'b10011: next_state = S_MEM_WRITE;
+                    5'b01100: next_state = S_MEM_WRITE;
+                    5'b01101: next_state = S_MEM_READ;
                     default: next_state = S_FETCH;
                 endcase
             end
@@ -215,9 +196,8 @@ module tinker_core (
         endcase
     end
 
-    // --- FSM Output Logic ---
+    // FSM Output Logic
     always_comb begin
-        // Defaults
         pc_write = 0;
         ir_write = 0;
         a_write = 0;
@@ -227,42 +207,42 @@ module tinker_core (
         reg_write = 0;
         mem_write = 0;
         pc_source = 2'b00;
-        alu_op_select = 5'b11000; // ADD
+        alu_op_select = 5'b11000;
         alu_src_a = 0;
-        alu_src_b = 2'b10; // 4
+        alu_src_b = 2'b10;
         adr_source = 0;
         mem_to_reg = 0;
 
         case (current_state)
             S_FETCH: begin
-                adr_source = 0;      // PC for fetch
+                adr_source = 0;
                 ir_write = 1;
-                alu_src_a = 0;       // PC
-                alu_src_b = 2'b10;   // 4
-                alu_op_select = 5'b11000; // ADD
+                alu_src_a = 0;
+                alu_src_b = 2'b10;
+                alu_op_select = 5'b11000;
                 alu_out_write = 1;
                 pc_write = 1;
-                pc_source = 2'b01;   // ALUOut (PC+4)
+                pc_source = 2'b01;
             end
             S_DECODE: begin
                 a_write = 1;
                 b_write = 1;
             end
             S_EXEC_ADDR: begin
-                alu_src_a = (opcode == 5'b01100 || opcode == 5'b01101) ? 1 : 1; // A (stack_ptr_reg for call/return)
-                alu_src_b = (opcode == 5'b01100 || opcode == 5'b01101) ? 2'b11 : 2'b01; // 8 or Imm
-                alu_op_select = (opcode == 5'b01100 || opcode == 5'b01101) ? 5'b11010 : 5'b11000; // SUB or ADD
+                alu_src_a = 1;
+                alu_src_b = (opcode == 5'b01100 || opcode == 5'b01101) ? 2'b11 : 2'b01;
+                alu_op_select = (opcode == 5'b01100 || opcode == 5'b01101) ? 5'b11010 : 5'b11000;
                 alu_out_write = 1;
             end
             S_EXEC_RTYPE: begin
-                alu_src_a = 1;       // A
-                alu_src_b = 2'b00;   // B
+                alu_src_a = 1;
+                alu_src_b = 2'b00;
                 alu_op_select = opcode;
                 alu_out_write = 1;
             end
             S_EXEC_ITYPE: begin
-                alu_src_a = 1;       // A
-                alu_src_b = 2'b01;   // Imm
+                alu_src_a = 1;
+                alu_src_b = 2'b01;
                 alu_op_select = opcode;
                 alu_out_write = 1;
             end
@@ -271,61 +251,59 @@ module tinker_core (
                 take_branch = (opcode == 5'b01011) ? (a != 0) : (opcode == 5'b01110) ? ($signed(a) > $signed(b)) : 0;
                 if (take_branch) begin
                     pc_write = 1;
-                    pc_source = 2'b11; // A (dest_reg value)
+                    pc_source = 2'b11;
                 end
             end
             S_EXEC_JUMP: begin
                 pc_write = 1;
                 case (opcode)
-                    5'b01000: pc_source = 2'b11; // A
+                    5'b01000: pc_source = 2'b11;
                     5'b01001: begin
-                        alu_src_a = 0;       // PC
-                        alu_src_b = 2'b00;   // B (src_reg1 value)
-                        alu_op_select = 5'b11000; // ADD
+                        alu_src_a = 0;
+                        alu_src_b = 2'b00;
+                        alu_op_select = 5'b11000;
                         alu_out_write = 1;
-                        pc_source = 2'b01;   // ALUOut
+                        pc_source = 2'b01;
                     end
                     5'b01010: begin
-                        alu_src_a = 0;       // PC
-                        alu_src_b = 2'b01;   // Imm
-                        alu_op_select = 5'b11000; // ADD
+                        alu_src_a = 0;
+                        alu_src_b = 2'b01;
+                        alu_op_select = 5'b11000;
                         alu_out_write = 1;
-                        pc_source = 2'b01;   // ALUOut
+                        pc_source = 2'b01;
                     end
                 endcase
             end
             S_MEM_READ: begin
-                adr_source = 1;      // ALUOut
+                adr_source = 1;
                 mdr_write = 1;
                 if (opcode == 5'b01101) begin
                     pc_write = 1;
-                    pc_source = 2'b10; // MDR
+                    pc_source = 2'b10;
                 end
             end
             S_MEM_WRITE: begin
-                adr_source = 1;      // ALUOut
+                adr_source = 1;
                 mem_write = 1;
                 if (opcode == 5'b01100) begin
                     pc_write = 1;
-                    pc_source = 2'b11; // A
+                    pc_source = 2'b11;
                 end
             end
             S_MEM_WB: begin
                 reg_write = 1;
-                mem_to_reg = 1;      // MDR
+                mem_to_reg = 1;
             end
             S_ALU_WB: begin
                 reg_write = 1;
-                mem_to_reg = 0;      // ALUOut
+                mem_to_reg = 0;
             end
-            S_HALT: ; // All controls off
+            S_HALT: ;
         endcase
     end
 
-    // --- Halt Output ---
     assign hlt = (current_state == S_HALT);
-
-// --- Supporting Modules ---
+endmodule
 
 // ALU Unit
 module alu_unit (
@@ -335,10 +313,6 @@ module alu_unit (
     output logic valid,
     output logic [63:0] out
 );
-    real f1, f2, fres;
-    assign f1 = $bitstoreal(in1);
-    assign f2 = $bitstoreal(in2);
-
     always_comb begin
         valid = 1;
         case (ctrl)
@@ -358,22 +332,6 @@ module alu_unit (
             5'b00111: out = in1 << in2;        // shftli
             5'b10001: out = in1;               // mov $r_d, $r_s
             5'b10010: out = {in1[63:12], in2[11:0]}; // mov $r_d, L
-            5'b10100: begin                    // addf
-                fres = f1 + f2;
-                out = $realtobits(fres);
-            end
-            5'b10101: begin                    // subf
-                fres = f1 - f2;
-                out = $realtobits(fres);
-            end
-            5'b10110: begin                    // mulf
-                fres = f1 * f2;
-                out = $realtobits(fres);
-            end
-            5'b10111: begin                    // divf
-                fres = f1 / f2;
-                out = $realtobits(fres);
-            end
             default: begin
                 valid = 0;
                 out = 64'h0;
@@ -421,7 +379,7 @@ endmodule
 // Instruction Decoder
 module inst_decoder (
     input logic [31:0] instruction,
-    output logic [63:0] imm,
+    output logic [63:64] imm,
     output logic [4:0] dest,
     output logic [4:0] src1,
     output logic [4:0] src2,
@@ -432,7 +390,7 @@ module inst_decoder (
         dest = instruction[26:22];
         src1 = instruction[21:17];
         src2 = instruction[16:12];
-        imm = {{52{instruction[11]}}, instruction[11:0]}; // Sign-extend
+        imm = {{52{instruction[11]}}, instruction[11:0]};
         case (opcode)
             5'b11001, 5'b11011, 5'b00101, 5'b00111, 5'b10010: src1 = dest;
             default: ;
@@ -454,7 +412,7 @@ module memory_unit (
     logic [7:0] bytes [0:524287];
     integer j, k;
 
-    assign instruction = {bytes[program_counter+3], bytes[program_counter+2], 
+    assign instruction = {bytes[program_counter+3], bytes[program_counter+2],
                           bytes[program_counter+1], bytes[program_counter]};
     assign data_out = {bytes[address+7], bytes[address+6], bytes[address+5], bytes[address+4],
                        bytes[address+3], bytes[address+2], bytes[address+1], bytes[address]};
@@ -469,6 +427,4 @@ module memory_unit (
                 bytes[address + k] <= data_in[8*k +: 8];
         end
     end
-endmodule
-
 endmodule
