@@ -439,22 +439,18 @@ module reg_file_bank (
     integer i;
     localparam MEMSIZE = 64'd524288;
 
-    // Combinational Read Ports - Read directly from register array
-    assign data1 = registers[addr1]; // REMOVED R0 check: (addr1 == 5'b0) ? 64'b0 : registers[addr1];
-    assign data2 = registers[addr2]; // REMOVED R0 check: (addr2 == 5'b0) ? 64'b0 : registers[addr2];
-    assign data_dest = registers[write_addr]; // Allow reading R0 if needed
+    // Modified assignments to read actual register values
+    assign data1 = registers[addr1];
+    assign data2 = registers[addr2];
+    assign data_dest = registers[write_addr];
     assign stack = registers[31];
 
-    always @(posedge clk or posedge reset) begin // Changed from always_ff
+    always @(posedge clk or posedge reset) begin
         if (reset) begin
-            // Initialize r0-r30 to 0
             for (i = 0; i < 31; i = i + 1) begin registers[i] <= 64'h0; end
-            // Initialize r31 to MEMSIZE
             registers[31] <= MEMSIZE;
-            // Ensure r0 is also 0 at reset
-            registers[0] <= 64'h0;
-        end else if (write_en) begin // Allow writing to r0 if write_addr is 0
-            registers[write_addr] <= write_data; // REMOVED R0 check: && write_addr != 5'b0
+        end else if (write_en && write_addr != 5'b0) begin
+            registers[write_addr] <= write_data;
         end
     end
 endmodule
