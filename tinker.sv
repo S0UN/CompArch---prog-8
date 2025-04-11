@@ -500,31 +500,41 @@ module alu_unit (
         endcase
     end
 endmodule
-
-// Instruction Decoder (Modified dest mapping for ADDI/SUBI using assign)
+// Instruction Decoder (Modified src1 mapping for ADDI/SUBI)
 module inst_decoder (
     input logic [31:0] instruction,
     output logic [63:0] imm,
-    output logic [4:0] dest,         // Output uses conditional assignment
-    output logic [4:0] src1,         // Assigned normally from src1 field
+    output logic [4:0] dest,         // Assigned normally from dest field
+    output logic [4:0] src1,         // Now conditionally assigned
     output logic [4:0] src2,         // Assigned normally from src2 field
     output logic [4:0] opcode
 );
     logic [11:0] imm_raw;
+    logic [4:0] opcode_internal; // Internal signal for opcode
 
     // Decode fields that are always the same position or mapping
     assign imm_raw = instruction[11:0];
-    assign opcode = instruction[31:27];         // Decode opcode directly
-    assign src1 = instruction[21:17];           // src1 output always comes from src1 field [21:17]
-    assign src2 = instruction[16:12];           // src2 output always comes from src2 field [16:12]
-    assign imm = {{52{imm_raw[11]}}, imm_raw};  // Sign extend immediate
+    assign opcode_internal = instruction[31:27];
+    assign opcode = opcode_internal; // Assign to output port
+    assign imm = {{52{imm_raw[11]}}, imm_raw}; // Sign extend immediate
+    assign dest = instruction[26:22];          // Destination register is always field [26:22]
+    assign src2 = instruction[16:12];          // src2 output always comes from src2 field [16:12]
 
-    // Assign destination register conditionally based on opcode
-    assign dest = (opcode == 5'b11001 || opcode == 5'b11011) // Check if opcode is ADDI or SUBI
-                  ? instruction[21:17]  // If TRUE, dest address comes from src1 field [21:17]
-                  : instruction[26:22]; // If FALSE, dest address comes from dest field [26:22] (default)
+    // Determine src1 register address based on opcode
+    always @(*) begin
+        // Default mapping: src1 normally comes from field [21:17]
+        src1 = instruction[21:17];
+
+        // Override mapping specifically for ADDI (11001) and SUBI (11011)
+        if (opcode_internal == 5'b11001 || opcode_internal == 5'b11011) begin
+            // For ADDI/SUBI: Use the destination register field [26:22] as src1 address
+            src1 = instruction[26:22];
+        end
+        // For all other opcodes, the default mapping applies.
+    end
 
 endmodule
+
 module reg_lit_mux (
     input logic [4:0] op,
     input logic [63:0] reg_val,
