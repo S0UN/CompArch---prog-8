@@ -1,21 +1,26 @@
 
-// Top-Level Module
+// Top-Level Module - MODIFIED
 module tinker_core (
     input logic clk,
-    input logic reset
-    // Add halt output if needed: output logic hlt
+    input logic reset,
+    output logic hlt // Added halt output signal
 );
-    // State machine states
-    typedef enum logic [2:0] {
+    // --- Constants ---
+    localparam HALT_OPCODE = 5'b11111; // Define an opcode for the HALT instruction
+
+    // --- State Machine ---
+    typedef enum logic [2:0] { // Now uses 3 bits for up to 8 states
         FETCH,
         DECODE,
         EXECUTE,
         MEMORY,
-        WRITEBACK
+        WRITEBACK,
+        HALTED      // New state for halt condition
     } state_t;
 
     state_t current_state, next_state;
 
+    // --- Internal Signals (Existing) ---
     // Instruction components
     logic [4:0] dest_reg, src_reg1, src_reg2, opcode;
     logic [31:0] instr_word, instr_reg; // instr_word from mem, instr_reg latched
@@ -39,30 +44,44 @@ module tinker_core (
     logic mem_to_reg;
     logic is_branch_instr, branch_taken; // From control_unit
 
-    // State register
+    // --- State Register ---
     always_ff @(posedge clk or posedge reset) begin
         if (reset)
             current_state <= FETCH;
+        else if (current_state == HALTED) // Stay in HALTED state once entered
+             current_state <= HALTED;
         else
             current_state <= next_state;
     end
 
-    // Next state logic
+    // --- Next State Logic ---
     always_comb begin
-        // Default to current state (for safety, though most states transition)
+        // Default to current state (safer default, important for HALTED)
         next_state = current_state;
         case (current_state)
-            FETCH:    next_state = DECODE;
-            DECODE:   next_state = EXECUTE;
-            EXECUTE:  next_state = state_t'(is_memory_operation(opcode) ? MEMORY :
-                                           (is_branch_instr ? FETCH : WRITEBACK)); // Added cast
-            MEMORY:   next_state = WRITEBACK;
-            WRITEBACK: next_state = FETCH;
-            default:  next_state = FETCH; // Default back to FETCH
+            FETCH:   next_state = DECODE;
+            DECODE: begin
+                // Check for HALT instruction after decoding
+                if (opcode == HALT_OPCODE) begin
+                    next_state = HALTED; // Go to HALTED state
+                end else begin
+                    next_state = EXECUTE; // Proceed normally
+                end
+            end
+            EXECUTE: begin
+                // Determine next state based on instruction type
+                 // Cast needed because ?: operator requires operands of same type
+                next_state = state_t'(is_memory_operation(opcode) ? MEMORY :
+                                      (is_branch_instr ? FETCH : WRITEBACK));
+            end
+            MEMORY:    next_state = WRITEBACK;
+            WRITEBACK: next_state = FETCH; // Loop back to FETCH after writeback
+            HALTED:    next_state = HALTED;  // Stay in HALTED state
+            default:   next_state = FETCH;  // Default back to FETCH for safety
         endcase
     end
 
-    // Control signals based on state
+    // --- Control Signals based on State (Including hlt) ---
     always_comb begin
         // Default values
         ir_write = 1'b0;
@@ -71,18 +90,18 @@ module tinker_core (
         mem_read = 1'b0;
         mem_write = 1'b0;
         mem_to_reg = 1'b0; // Default writeback from ALU
+        hlt = 1'b0; // Default hlt signal to low
 
         case (current_state)
             FETCH: begin
-                // Latch instruction read from memory address PC
-                ir_write = 1'b1;
-                // Tell memory unit to read instruction at PC
-                mem_read = 1'b1; // Use read port for instruction fetch too
+                ir_write = 1'b1; // Latch instruction read from memory
+                mem_read = 1'b1; // Tell memory unit to read instruction at PC
             end
 
             DECODE: begin
-                // Combinational decode using instr_reg
-                // Read registers combinatorially via reg_file instance
+                // Combinational decode happens via inst_decoder
+                // Register reads happen combinatorially via reg_file instance
+                // No specific control signals asserted here by FSM
             end
 
             EXECUTE: begin
@@ -91,20 +110,21 @@ module tinker_core (
                 if (is_branch_instr && branch_taken) begin
                     pc_write_enable = 1'b1; // Update PC immediately with branch target
                 end
+                // Note: ALU result latched at posedge clk *if* current_state == EXECUTE
             end
 
             MEMORY: begin
-                // Perform Load or Store based on opcode
                 if (is_load_operation(opcode)) begin
-                    mem_read = 1'b1; // Read from data memory at mem_addr
+                    mem_read = 1'b1; // Read from data memory
                 end else if (is_store_operation(opcode)) begin
-                    mem_write = 1'b1; // Write to data memory at mem_addr
+                    mem_write = 1'b1; // Write to data memory
                 end
+                // Note: Memory data latched at posedge clk *if* current_state == MEMORY and mem_read
             end
 
             WRITEBACK: begin
-                // Enable register write if needed
-                if (!is_store_operation(opcode) && !is_branch_no_writeback(opcode)) begin
+                // Enable register write if needed (not for stores or certain branches)
+                if (!is_store_operation(opcode) && !is_branch_no_writeback(opcode) && opcode != HALT_OPCODE) begin // Don't write for HALT
                     reg_write = 1'b1;
                 end
 
@@ -116,12 +136,14 @@ module tinker_core (
                 end
 
                 // Update PC for the *next* instruction if no branch was taken earlier
-                // The actual value pc_next comes from control_unit (PC+4)
                 if (!branch_taken) begin
                     pc_write_enable = 1'b1;
                 end
             end
-            default: begin // Handles potential X state during reset/init
+
+            HALTED: begin
+                hlt = 1'b1; // Assert the halt signal
+                // Ensure all other actions are disabled
                 ir_write = 1'b0;
                 pc_write_enable = 1'b0;
                 reg_write = 1'b0;
@@ -129,107 +151,115 @@ module tinker_core (
                 mem_write = 1'b0;
                 mem_to_reg = 1'b0;
             end
+
+            default: begin // Handles potential X state during reset/init
+                ir_write = 1'b0;
+                pc_write_enable = 1'b0;
+                reg_write = 1'b0;
+                mem_read = 1'b0;
+                mem_write = 1'b0;
+                mem_to_reg = 1'b0;
+                hlt = 1'b0;
+            end
         endcase
     end
 
-    // Helper functions (can be placed outside always_comb)
+    // --- Helper Functions (Unchanged unless HALT needs special handling) ---
     function logic is_memory_operation(logic [4:0] op);
-        // mov $rd, ($rs)(L) OR mov ($rd)(L), $rs
-        return (op == 5'b10000 || op == 5'b10011 || op == 5'b01100 || op == 5'b01101); // Add Call/Ret
+         return (op == 5'b10000 || op == 5'b10011 || op == 5'b01100 || op == 5'b01101); // Load/Store/Call/Ret
     endfunction
 
     function logic is_load_operation(logic [4:0] op);
-        // mov $rd, ($rs)(L) OR return (reads stack)
-        return (op == 5'b10000 || op == 5'b01101);
+         return (op == 5'b10000 || op == 5'b01101); // Load/Ret
     endfunction
 
     function logic is_store_operation(logic [4:0] op);
-        // mov ($rd)(L), $rs OR call (writes stack)
-        return (op == 5'b10011 || op == 5'b01100);
+        return (op == 5'b10011 || op == 5'b01100); // Store/Call
     endfunction
 
     function logic is_branch_no_writeback(logic [4:0] op);
-        // Any branch/jump/call/ret instruction that doesn't write Rd normally
-        return (op >= 5'b01000 && op <= 5'b01110); // All branch/jump/call/ret instructions
+         // Any branch/jump/call/ret instruction that doesn't write Rd normally
+         // Also include HALT here as it doesn't write back
+         return (op >= 5'b01000 && op <= 5'b01110) || op == HALT_OPCODE;
     endfunction
 
-    // --- Datapath Components and Registers ---
+    // --- Datapath Components and Registers (Instantiation unchanged) ---
 
     // Instruction Register
     always_ff @(posedge clk) begin
-        // Latch instruction fetched from memory during FETCH state
-        if (ir_write) begin // Only write when ir_write is asserted in FETCH
+        if (ir_write) begin
             instr_reg <= instr_word;
         end
     end
 
     // Memory Data Register
     always_ff @(posedge clk) begin
-        // Latch data read from memory during MEMORY state (for Loads/Returns)
-        // Check if mem_read was active in the *previous* cycle (MEMORY state)
-        // Simpler: Latch whenever mem_read is high and it's a load/ret op? No, latch in MEMORY state.
-        if (current_state == MEMORY && mem_read) begin // Latch if reading in MEMORY state
+         // Latch if reading data memory in the MEMORY state
+         // Need to check the state the FSM was in *during* the cycle mem_read was high
+         // It's simpler to latch based on the FSM state *before* the clock edge
+         // This requires knowing the previous state or carefully timing.
+         // Let's stick to latching when *currently* in MEMORY and reading.
+         // This means data is available for WRITEBACK in the *next* cycle.
+        if (current_state == MEMORY && mem_read) begin
              mem_data_reg <= mem_data_out;
         end
     end
 
     // ALU Output Register
     always_ff @(posedge clk) begin
-         // Latch ALU result at the end of EXECUTE state
-        if (current_state == EXECUTE) begin
+       // Latch ALU result at the end of EXECUTE state
+       // This result is used in MEMORY (for address calc?) or WRITEBACK
+       if (current_state == EXECUTE) begin
             alu_out_reg <= alu_output;
-        end
+       end
     end
 
     // Fetch unit (Instantiated PC register)
     fetch_unit fetch (
         .clk(clk),
         .reset(reset),
-        // .stack(stack_ptr), // stack input removed from fetch_unit
-        .pc_in(pc_next),          // Value for next PC (from control_unit)
-        .pc_out(pc_current),      // Current PC value
-        .pc_write(pc_write_enable) // Enable PC update (from FSM)
+        .pc_in(pc_next),
+        .pc_out(pc_current),
+        .pc_write(pc_write_enable)
     );
 
     // Memory unit with read/write control
     memory_unit memory (
-        .program_counter(pc_current), // Not strictly needed if address is always used
+        .program_counter(pc_current), // For potential direct connection, though address port is used
         .clk(clk),
         .reset(reset),
-        .read_en(mem_read),         // Read Enable from FSM
-        .write_en(mem_write),       // Write Enable from FSM
-        .data_in(mem_data_in),      // Data source for stores (from mem_handler)
-        .address(current_state == FETCH ? pc_current : mem_addr), // Use PC for fetch, mem_addr otherwise
-        .data_out(mem_data_out),    // Raw data output from memory
-        .instruction(instr_word)    // Raw instruction output from memory
+        .read_en(mem_read),
+        .write_en(mem_write),
+        .data_in(mem_data_in),
+        .address(current_state == FETCH ? pc_current : mem_addr), // Select PC or calculated addr
+        .data_out(mem_data_out),
+        .instruction(instr_word)
     );
 
     // Control unit for managing branching and next PC value
     control_unit ctrl (
-        .operation(opcode),         // Decoded opcode
-        .dest_in(dest_val),         // Value of Rd (read from regfile) - For BR/CALL $rd target
-        .src_in1(src_val1),         // Value of Rs1 (read from regfile) - For condition check
-        .src_in2(src_val2),         // Value of Rs2 (read from regfile) - For condition check
-        .immediate(imm_value),      // Decoded immediate
-        .current_pc(pc_current),    // Current PC
+        .operation(opcode),
+        .dest_in(dest_val),
+        .src_in1(src_val1),
+        .src_in2(src_val2),
+        .immediate(imm_value),
+        .current_pc(pc_current),
         .memory_data(mem_data_reg), // Use latched memory data for RET target
-        .next_pc(pc_next),          // OUTPUT: Calculated next PC value (PC+4 or target)
-        .is_branch(is_branch_instr),// OUTPUT: True if instruction is branch/jump type
-        .branch_taken(branch_taken) // OUTPUT: True if conditional branch is taken
+        .next_pc(pc_next),
+        .is_branch(is_branch_instr),
+        .branch_taken(branch_taken)
     );
 
     // Memory handler computes address/data for memory ops
     mem_handler mem_mgr (
-        // .state(current_state), // State no longer needed? Maybe for CALL/RET logic
         .op(opcode),
-        .dest(dest_val),         // Value of Rd register (for store addr base)
-        .src(src_val1),          // Value of Rs1 register (for load addr base, or store data)
-        .imm(imm_value),         // Immediate offset
-        .pc(pc_current),         // Needed for CALL return address calculation
-        .r31(stack_ptr),         // Stack pointer value from regfile
-        .addr_out(mem_addr),     // OUTPUT: Address for MEMORY stage
-        .data_out(mem_data_in)   // OUTPUT: Data for MEMORY stage (stores/call)
-        // Removed reg_en output as writeback source decided by FSM (mem_to_reg)
+        .dest(dest_val),
+        .src(src_val1),
+        .imm(imm_value),
+        .pc(pc_current),
+        .r31(stack_ptr),
+        .addr_out(mem_addr),
+        .data_out(mem_data_in)
     );
 
     // Instruction decoder uses the instruction register
@@ -246,34 +276,34 @@ module tinker_core (
     reg_file_bank reg_file (
         .clk(clk),
         .reset(reset),
-        .write_en(reg_write), // Controlled directly by FSM reg_write signal
-        .write_data(mem_to_reg ? mem_data_reg : alu_out_reg), // Select data source via FSM mem_to_reg
-        .addr1(src_reg1),         // Read address 1 (from instr_reg)
-        .addr2(src_reg2),         // Read address 2 (from instr_reg)
-        .write_addr(dest_reg),    // Write address (from instr_reg)
-        .data1(src_val1),         // OUTPUT: Read data 1
-        .data2(src_val2),         // OUTPUT: Read data 2
-        .data_dest(dest_val),     // OUTPUT: Current value of dest reg (read addr = write addr)
-        .stack(stack_ptr)         // OUTPUT: Current value of R31
+        .write_en(reg_write), // Controlled by FSM
+        .write_data(mem_to_reg ? mem_data_reg : alu_out_reg), // Select data source via FSM
+        .addr1(src_reg1),
+        .addr2(src_reg2),
+        .write_addr(dest_reg),
+        .data1(src_val1),
+        .data2(src_val2),
+        .data_dest(dest_val),
+        .stack(stack_ptr) // Output R31 value
     );
 
     // Multiplexer for ALU second operand
     reg_lit_mux mux (
         .op(opcode),
-        .reg_val(src_val2),      // Value of Rs2 register
-        .lit_val(imm_value),     // Decoded immediate
-        .out(alu_operand2)       // OUTPUT: Second operand for ALU
+        .reg_val(src_val2),
+        .lit_val(imm_value),
+        .out(alu_operand2)
     );
 
     // ALU unit - computes result combinatorially during EXECUTE
     alu_unit alu (
-        .ctrl(opcode),           // Decoded opcode
-        .in1(src_val1),          // Value of Rs1 register
-        .in2(alu_operand2),      // Output of reg_lit_mux
-        .out(alu_output)         // OUTPUT: Combinational ALU result
+        .ctrl(opcode),
+        .in1(src_val1),
+        .in2(alu_operand2),
+        .out(alu_output)
     );
 
-endmodule
+endmodule // End of tinker_core
 
 
 //------------------------------------------------------------------------------
@@ -474,36 +504,42 @@ module mem_handler (
     end
 endmodule
 
-// Simplified Register File (Interface Adjusted)
+// --- MODIFIED Register File ---
 module reg_file_bank (
     input logic clk,
     input logic reset,
-    input logic write_en,      // From FSM
+    input logic write_en,       // From FSM
     input logic [63:0] write_data, // From MUX controlled by FSM
-    input logic [4:0] addr1,     // Read Address 1 (Rs1)
-    input logic [4:0] addr2,     // Read Address 2 (Rs2)
+    input logic [4:0] addr1,       // Read Address 1 (Rs1)
+    input logic [4:0] addr2,       // Read Address 2 (Rs2)
     input logic [4:0] write_addr,  // Write Address (Rd)
     output logic [63:0] data1,     // Output Read Data 1
     output logic [63:0] data2,     // Output Read Data 2
-    output logic [63:0] data_dest, // Output value currently at write_addr (for potential forwarding/use)
+    output logic [63:0] data_dest, // Output value currently at write_addr
     output logic [63:0] stack      // Output R31 value
 );
     logic [63:0] registers [0:31];
     integer i;
 
+    // Define Memory Size constant for stack pointer initialization
+    // Ideally, this comes from a parameter or package, but hardcoding to match memory_unit for now.
+    localparam MEMSIZE = 64'd32768;
+
     // Combinational Read Ports (R0 hardwired to 0)
     assign data1 = (addr1 == 5'b0) ? 64'b0 : registers[addr1];
     assign data2 = (addr2 == 5'b0) ? 64'b0 : registers[addr2];
     assign data_dest = (write_addr == 5'b0) ? 64'b0 : registers[write_addr];
-    assign stack = registers[31];
+    assign stack = registers[31]; // R31 is the stack pointer
 
-    // Synchronous Write Port
+    // Synchronous Write Port with Modified Reset Logic
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
+            // Initialize r0-r30 to 0
             for (i = 0; i < 31; i = i + 1) begin
                 registers[i] <= 64'h0;
             end
-            registers[31] <= 64'd32768;  // Smaller default stack pointer if memory size reduced
+            // Initialize r31 to MEMSIZE
+            registers[31] <= MEMSIZE;
         end
         // R0 is hardwired to 0, cannot be written.
         else if (write_en && write_addr != 5'b0) begin
