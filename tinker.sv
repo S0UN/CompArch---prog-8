@@ -1,97 +1,331 @@
-// Top-Level Module
+// Define HALT opcode
+`define HALT_OPCODE 5'b11111
+
+// Top-Level Multi-Cycle FSM Module
 module tinker_core (
     input logic clk,
-    input logic reset
+    input logic reset,
+    output logic hlt  // Output halt signal
 );
-    logic [4:0] dest_reg, src_reg1, src_reg2, opcode;
-    logic [31:0] instr_word;
-    logic [63:0] pc_current, pc_next;
-    logic [63:0] imm_value, dest_val, src_val1, src_val2, alu_operand2, alu_output;
-    logic [63:0] stack_ptr, mem_data_in, mem_addr, mem_data_out;
-    logic mem_write, write_from_mem, write_from_alu;
+    // --- State Definition ---
+    typedef enum logic [3:0] {
+        S_FETCH,
+        S_DECODE,
+        S_EXEC_ADDR,  // Address calc for Load/Store/Call/Return
+        S_EXEC_RTYPE, // R-Type ALU
+        S_EXEC_ITYPE, // I-Type ALU
+        S_EXEC_BRANCH,// Branch condition eval
+        S_EXEC_JUMP,  // Jump PC update
+        S_MEM_READ,   // Memory read (Load/Return)
+        S_MEM_WRITE,  // Memory write (Store/Call)
+        S_MEM_WB,     // Writeback from memory
+        S_ALU_WB,     // Writeback from ALU
+        S_HALT        // Halt state
+    } StateType;
 
-    fetch_unit fetch (
+    StateType current_state, next_state;
+
+    // --- Datapath Registers ---
+    logic [63:0] pc;             // Program Counter
+    logic [31:0] ir;             // Instruction Register
+    logic [63:0] a, b;           // Register operands
+    logic [63:0] alu_out;        // ALU output
+    logic [63:0] mdr;            // Memory Data Register
+    logic [63:0] stack_ptr_reg;  // Stack pointer (R31)
+
+    // --- Decoded Instruction Fields ---
+    logic [4:0] opcode;
+    logic [4:0] dest_reg;
+    logic [4:0] src_reg1;
+    logic [4:0] src_reg2;
+    logic [63:0] immediate;
+
+    // --- Internal Wires ---
+    logic [63:0] reg_read_data1, reg_read_data2, reg_write_data;
+    logic [63:0] mem_read_data, mem_write_data;
+    logic [63:0] alu_in1, alu_in2;
+    logic [63:0] next_pc_select;
+    logic [63:0] mem_addr_select;
+
+    // --- Control Signals ---
+    logic pc_write, ir_write, a_write, b_write, alu_out_write, mdr_write;
+    logic reg_write, mem_write;
+    logic [1:0] pc_source;      // 0: PC+4, 1: ALUOut, 2: MDR, 3: A
+    logic [4:0] alu_op_select;  // Opcode or adjusted for PC+4
+    logic alu_src_a;            // 0: PC, 1: A
+    logic [1:0] alu_src_b;      // 0: B, 1: Imm, 2: 4, 3: 8
+    logic adr_source;           // 0: PC, 1: ALUOut
+    logic mem_to_reg;           // 0: ALUOut, 1: MDR
+
+    // --- Instantiate Functional Units ---
+
+    // ALU Unit
+    logic alu_valid;
+    alu_unit alu (
+        .ctrl(alu_op_select),
+        .in1(alu_in1),
+        .in2(alu_in2),
+        .valid(alu_valid),
+        .out(alu_out_internal)
+    );
+    logic [63:0] alu_out_internal;
+
+    // Register File
+    reg_file_bank reg_file (
         .clk(clk),
         .reset(reset),
-        .stack(stack_ptr),
-        .pc_in(pc_next),
-        .pc_out(pc_current)
+        .mem_write_en(1'b0),  // Unified write enable
+        .alu_write_en(reg_write),
+        .write_data(reg_write_data),
+        .addr1(src_reg1),
+        .addr2(src_reg2),
+        .write_addr(dest_reg),
+        .data1(reg_read_data1),
+        .data2(reg_read_data2),
+        .data_dest(),  // Not used
+        .stack(stack_ptr_reg)
     );
 
-    memory_unit memory (  
-        .program_counter(pc_current),
+    // Memory Unit
+    memory_unit memory (
+        .program_counter(pc),
         .clk(clk),
         .reset(reset),
         .write_en(mem_write),
-        .data_in(mem_data_in),
-        .address(mem_addr),
-        .data_out(mem_data_out),
-        .instruction(instr_word)
+        .data_in(mem_write_data),
+        .address(mem_addr_select),
+        .data_out(mem_read_data),
+        .instruction(ir_internal)
     );
+    logic [31:0] ir_internal;
 
-    control_unit ctrl (
-        .operation(opcode),
-        .dest_in(dest_val),
-        .src_in1(src_val1),
-        .src_in2(src_val2),
-        .immediate(imm_value),
-        .current_pc(pc_current),
-        .memory_data(mem_data_out),
-        .next_pc(pc_next)
-    );
-
-    mem_handler mem_mgr (
-        .op(opcode),
-        .dest(dest_val),
-        .src(src_val1),
-        .imm(imm_value),
-        .pc(pc_current),
-        .r31(stack_ptr),
-        .addr_out(mem_addr),
-        .data_out(mem_data_in),
-        .write_en(mem_write),
-        .reg_en(write_from_mem)
-    );
-
+    // Instruction Decoder
     inst_decoder dec (
-        .instruction(instr_word),
-        .imm(imm_value),
+        .instruction(ir),
+        .imm(immediate),
         .dest(dest_reg),
         .src1(src_reg1),
         .src2(src_reg2),
         .opcode(opcode)
     );
 
-    reg_file_bank reg_file (  
-        .clk(clk),
-        .reset(reset),
-        .mem_write_en(write_from_mem),
-        .alu_write_en(write_from_alu),
-        .write_data(write_from_mem ? mem_data_out : alu_output),
-        .addr1(src_reg1),
-        .addr2(src_reg2),
-        .write_addr(dest_reg),
-        .data1(src_val1),
-        .data2(src_val2),
-        .data_dest(dest_val),
-        .stack(stack_ptr)
-    );
+    // --- Datapath MUXes ---
 
-    reg_lit_mux mux (
-        .op(opcode),
-        .reg_val(src_val2),
-        .lit_val(imm_value),
-        .out(alu_operand2)
-    );
+    // PC Source MUX
+    always_comb begin
+        case (pc_source)
+            2'b00: next_pc_select = pc + 4;  // PC+4
+            2'b01: next_pc_select = alu_out; // Branch/Jump target
+            2'b10: next_pc_select = mdr;     // Return address
+            2'b11: next_pc_select = a;       // Register jump
+            default: next_pc_select = pc + 4;
+        endcase
+    end
 
-    alu_unit alu (
-        .ctrl(opcode),
-        .in1(src_val1),
-        .in2(alu_operand2),
-        .valid(write_from_alu),
-        .out(alu_output)
-    );
-endmodule
+    // Memory Address MUX
+    assign mem_addr_select = adr_source ? alu_out : pc;
+
+    // ALU Input A MUX
+    assign alu_in1 = alu_src_a ? a : pc;
+
+    // ALU Input B MUX
+    always_comb begin
+        case (alu_src_b)
+            2'b00: alu_in2 = b;
+            2'b01: alu_in2 = immediate;
+            2'b10: alu_in2 = 64'd4;
+            2'b11: alu_in2 = 64'd8;
+            default: alu_in2 = 64'b0;
+        endcase
+    end
+
+    // Register Write Data MUX
+    assign reg_write_data = mem_to_reg ? mdr : alu_out;
+
+    // Memory Write Data
+    assign mem_write_data = (opcode == 5'b01100) ? (pc + 4) : b; // PC+4 for call, B for store
+
+    // --- State Register ---
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset)
+            current_state <= S_FETCH;
+        else
+            current_state <= next_state;
+    end
+
+    // --- Datapath Register Updates ---
+    always_ff @(posedge clk) begin
+        if (pc_write) pc <= next_pc_select;
+        if (ir_write) ir <= ir_internal;
+        if (a_write) a <= reg_read_data1;
+        if (b_write) b <= reg_read_data2;
+        if (alu_out_write) alu_out <= alu_out_internal;
+        if (mdr_write) mdr <= mem_read_data;
+    end
+
+    // --- FSM Next State Logic ---
+    always_comb begin
+        next_state = current_state;
+        case (current_state)
+            S_FETCH: next_state = S_DECODE;
+            S_DECODE: begin
+                case (opcode)
+                    // R-Type ALU
+                    5'b11000, 5'b11010, 5'b11100, 5'b11101, // add, sub, mul, div
+                    5'b00000, 5'b00001, 5'b00010, 5'b00011, // and, or, xor, not
+                    5'b00100, 5'b00110, 5'b10100, 5'b10101, // shftr, shftl, addf, subf
+                    5'b10110, 5'b10111, 5'b10001:           // mulf, divf, mov $r_d, $r_s
+                        next_state = S_EXEC_RTYPE;
+                    // I-Type ALU
+                    5'b11001, 5'b11011, 5'b00101, 5'b00111, // addi, subi, shftri, shftli
+                    5'b10010:                               // mov $r_d, L
+                        next_state = S_EXEC_ITYPE;
+                    // Memory/Stack Ops
+                    5'b10000, 5'b10011, 5'b01100, 5'b01101: // mov $r_d, ($r_s)(L), mov ($r_d)(L), $r_s, call, return
+                        next_state = S_EXEC_ADDR;
+                    // Branches
+                    5'b01011, 5'b01110:                     // brnz, brgt
+                        next_state = S_EXEC_BRANCH;
+                    // Jumps
+                    5'b01000, 5'b01001, 5'b01010:           // br, brr $r_d, brr L
+                        next_state = S_EXEC_JUMP;
+                    `HALT_OPCODE: next_state = S_HALT;
+                    default: next_state = S_FETCH;
+                endcase
+            end
+            S_EXEC_ADDR: begin
+                case (opcode)
+                    5'b10000: next_state = S_MEM_READ;  // Load
+                    5'b10011: next_state = S_MEM_WRITE; // Store
+                    5'b01100: next_state = S_MEM_WRITE; // Call
+                    5'b01101: next_state = S_MEM_READ;  // Return
+                    default: next_state = S_FETCH;
+                endcase
+            end
+            S_EXEC_RTYPE: next_state = S_ALU_WB;
+            S_EXEC_ITYPE: next_state = S_ALU_WB;
+            S_EXEC_BRANCH: next_state = S_FETCH;
+            S_EXEC_JUMP: next_state = S_FETCH;
+            S_MEM_READ: next_state = (opcode == 5'b01101) ? S_FETCH : S_MEM_WB;
+            S_MEM_WRITE: next_state = S_FETCH;
+            S_MEM_WB: next_state = S_FETCH;
+            S_ALU_WB: next_state = S_FETCH;
+            S_HALT: next_state = S_HALT;
+            default: next_state = S_FETCH;
+        endcase
+    end
+
+    // --- FSM Output Logic ---
+    always_comb begin
+        // Defaults
+        pc_write = 0;
+        ir_write = 0;
+        a_write = 0;
+        b_write = 0;
+        alu_out_write = 0;
+        mdr_write = 0;
+        reg_write = 0;
+        mem_write = 0;
+        pc_source = 2'b00;
+        alu_op_select = 5'b11000; // ADD
+        alu_src_a = 0;
+        alu_src_b = 2'b10; // 4
+        adr_source = 0;
+        mem_to_reg = 0;
+
+        case (current_state)
+            S_FETCH: begin
+                adr_source = 0;      // PC for fetch
+                ir_write = 1;
+                alu_src_a = 0;       // PC
+                alu_src_b = 2'b10;   // 4
+                alu_op_select = 5'b11000; // ADD
+                alu_out_write = 1;
+                pc_write = 1;
+                pc_source = 2'b01;   // ALUOut (PC+4)
+            end
+            S_DECODE: begin
+                a_write = 1;
+                b_write = 1;
+            end
+            S_EXEC_ADDR: begin
+                alu_src_a = (opcode == 5'b01100 || opcode == 5'b01101) ? 1 : 1; // A (stack_ptr_reg for call/return)
+                alu_src_b = (opcode == 5'b01100 || opcode == 5'b01101) ? 2'b11 : 2'b01; // 8 or Imm
+                alu_op_select = (opcode == 5'b01100 || opcode == 5'b01101) ? 5'b11010 : 5'b11000; // SUB or ADD
+                alu_out_write = 1;
+            end
+            S_EXEC_RTYPE: begin
+                alu_src_a = 1;       // A
+                alu_src_b = 2'b00;   // B
+                alu_op_select = opcode;
+                alu_out_write = 1;
+            end
+            S_EXEC_ITYPE: begin
+                alu_src_a = 1;       // A
+                alu_src_b = 2'b01;   // Imm
+                alu_op_select = opcode;
+                alu_out_write = 1;
+            end
+            S_EXEC_BRANCH: begin
+                logic take_branch;
+                take_branch = (opcode == 5'b01011) ? (a != 0) : (opcode == 5'b01110) ? ($signed(a) > $signed(b)) : 0;
+                if (take_branch) begin
+                    pc_write = 1;
+                    pc_source = 2'b11; // A (dest_reg value)
+                end
+            end
+            S_EXEC_JUMP: begin
+                pc_write = 1;
+                case (opcode)
+                    5'b01000: pc_source = 2'b11; // A
+                    5'b01001: begin
+                        alu_src_a = 0;       // PC
+                        alu_src_b = 2'b00;   // B (src_reg1 value)
+                        alu_op_select = 5'b11000; // ADD
+                        alu_out_write = 1;
+                        pc_source = 2'b01;   // ALUOut
+                    end
+                    5'b01010: begin
+                        alu_src_a = 0;       // PC
+                        alu_src_b = 2'b01;   // Imm
+                        alu_op_select = 5'b11000; // ADD
+                        alu_out_write = 1;
+                        pc_source = 2'b01;   // ALUOut
+                    end
+                endcase
+            end
+            S_MEM_READ: begin
+                adr_source = 1;      // ALUOut
+                mdr_write = 1;
+                if (opcode == 5'b01101) begin
+                    pc_write = 1;
+                    pc_source = 2'b10; // MDR
+                end
+            end
+            S_MEM_WRITE: begin
+                adr_source = 1;      // ALUOut
+                mem_write = 1;
+                if (opcode == 5'b01100) begin
+                    pc_write = 1;
+                    pc_source = 2'b11; // A
+                end
+            end
+            S_MEM_WB: begin
+                reg_write = 1;
+                mem_to_reg = 1;      // MDR
+            end
+            S_ALU_WB: begin
+                reg_write = 1;
+                mem_to_reg = 0;      // ALUOut
+            end
+            S_HALT: ; // All controls off
+        endcase
+    end
+
+    // --- Halt Output ---
+    assign hlt = (current_state == S_HALT);
+
+// --- Supporting Modules ---
 
 // ALU Unit
 module alu_unit (
@@ -148,22 +382,6 @@ module alu_unit (
     end
 endmodule
 
-// Register/Literal Mux
-module reg_lit_mux (
-    input logic [4:0] op,
-    input logic [63:0] reg_val,
-    input logic [63:0] lit_val,
-    output logic [63:0] out
-);
-    always_comb begin
-        if (op == 5'b11001 || op == 5'b11011 || op == 5'b00101 || 
-            op == 5'b00111 || op == 5'b10010)
-            out = lit_val;
-        else
-            out = reg_val;
-    end
-endmodule
-
 // Register File
 module reg_file_bank (
     input logic clk,
@@ -179,7 +397,7 @@ module reg_file_bank (
     output logic [63:0] data_dest,
     output logic [63:0] stack
 );
-    logic [63:0] registers [0:31]; 
+    logic [63:0] registers [0:31];
     logic write_en;
     integer i;
 
@@ -214,84 +432,10 @@ module inst_decoder (
         dest = instruction[26:22];
         src1 = instruction[21:17];
         src2 = instruction[16:12];
-        imm = {52'h0, instruction[11:0]};
+        imm = {{52{instruction[11]}}, instruction[11:0]}; // Sign-extend
         case (opcode)
             5'b11001, 5'b11011, 5'b00101, 5'b00111, 5'b10010: src1 = dest;
-            default: ; 
-        endcase
-    end
-endmodule
-
-// Memory Handler
-module mem_handler (
-    input logic [4:0] op,
-    input logic [63:0] dest,
-    input logic [63:0] src,
-    input logic [63:0] imm,
-    input logic [63:0] pc,
-    input logic [63:0] r31,
-    output logic [63:0] addr_out,
-    output logic [63:0] data_out,
-    output logic write_en,
-    output logic reg_en
-);
-    always_comb begin
-        case (op)
-            5'b01100: begin  // call
-                addr_out = r31 - 8;
-                data_out = pc + 4;
-                write_en = 1;
-                reg_en = 0;
-            end
-            5'b01101: begin  // return
-                addr_out = r31 - 8;
-                data_out = 64'h0;
-                write_en = 0;
-                reg_en = 0;
-            end
-            5'b10000: begin  // mov $r_d, ($r_s)(L)
-                addr_out = src + imm;
-                data_out = 64'h0;
-                write_en = 0;
-                reg_en = 1;
-            end
-            5'b10011: begin  // mov ($r_d)(L), $r_s
-                addr_out = dest + imm;
-                data_out = src;
-                write_en = 1;
-                reg_en = 0;
-            end
-            default: begin
-                addr_out = 64'h2000;
-                data_out = 64'h0;
-                write_en = 0;
-                reg_en = 0;
-            end
-        endcase
-    end
-endmodule
-
-// Control Unit
-module control_unit (
-    input logic [4:0] operation,
-    input logic [63:0] dest_in,
-    input logic [63:0] src_in1,
-    input logic [63:0] src_in2,
-    input logic [63:0] immediate,
-    input logic [63:0] current_pc,
-    input logic [63:0] memory_data,
-    output logic [63:0] next_pc
-);
-    always_comb begin
-        case (operation)
-            5'b01000: next_pc = dest_in;                      // br
-            5'b01001: next_pc = current_pc + dest_in;         // brr $r_d
-            5'b01010: next_pc = current_pc + $signed(immediate); // brr L
-            5'b01011: next_pc = (src_in1 != 0) ? dest_in : current_pc + 4; // brnz
-            5'b01100: next_pc = dest_in;                      // call
-            5'b01101: next_pc = memory_data;                  // return
-            5'b01110: next_pc = (src_in1 > src_in2) ? dest_in : current_pc + 4; // brgt
-            default:  next_pc = current_pc + 4;
+            default: ;
         endcase
     end
 endmodule
@@ -307,21 +451,13 @@ module memory_unit (
     output logic [63:0] data_out,
     output logic [31:0] instruction
 );
-    logic [7:0] bytes [0:524287]; 
+    logic [7:0] bytes [0:524287];
     integer j, k;
 
-    assign instruction[31:24] = bytes[program_counter+3];
-    assign instruction[23:16] = bytes[program_counter+2];
-    assign instruction[15:8]  = bytes[program_counter+1];
-    assign instruction[7:0]   = bytes[program_counter];
-    assign data_out[63:56] = bytes[address+7];
-    assign data_out[55:48] = bytes[address+6];
-    assign data_out[47:40] = bytes[address+5];
-    assign data_out[39:32] = bytes[address+4];
-    assign data_out[31:24] = bytes[address+3];
-    assign data_out[23:16] = bytes[address+2];
-    assign data_out[15:8]  = bytes[address+1];
-    assign data_out[7:0]   = bytes[address];
+    assign instruction = {bytes[program_counter+3], bytes[program_counter+2], 
+                          bytes[program_counter+1], bytes[program_counter]};
+    assign data_out = {bytes[address+7], bytes[address+6], bytes[address+5], bytes[address+4],
+                       bytes[address+3], bytes[address+2], bytes[address+1], bytes[address]};
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -335,21 +471,4 @@ module memory_unit (
     end
 endmodule
 
-// Fetch Unit
-module fetch_unit (
-    input logic clk,
-    input logic reset,
-    input logic [63:0] stack,
-    input logic [63:0] pc_in,
-    output logic [63:0] pc_out
-);
-    logic [63:0] pc;
-    assign pc_out = pc;
-
-    always_ff @(posedge clk or posedge reset) begin
-        if (reset)
-            pc <= 64'h2000;
-        else
-            pc <= pc_in;
-    end
 endmodule
