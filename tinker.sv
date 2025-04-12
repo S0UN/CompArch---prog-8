@@ -1,4 +1,4 @@
-// Top-Level Module - MODIFIED
+// Top-Level Modul
 module tinker_core (
     input logic clk,
     input logic reset,
@@ -261,7 +261,7 @@ module fetch_unit (
     end
 endmodule
 
-// Modified Memory Unit (Using always @)
+// Modified Memory Unit
 module memory_unit (
     input logic [63:0] program_counter,
     input logic clk,
@@ -364,7 +364,7 @@ module control_unit (
     end
 endmodule
 
-// Modified Memory Handler (Using always @(*))
+// Modified Memory Handler=
 module mem_handler (
     input logic [4:0] op,
     input logic [63:0] dest,
@@ -388,7 +388,7 @@ module mem_handler (
     end
 endmodule
 
-// Modified Register File (Using always @) - R0 NOT hardwired
+// Modified Register File (Using always @) 
 module reg_file_bank (
     input logic clk,
     input logic reset,
@@ -448,7 +448,7 @@ module alu_unit (
     end
 endmodule
 
-// Instruction Decoder (Modified src1 mapping for ADDI/SUBI/SHFTRI/SHFTLI)
+// Instruction Decoder 
 module inst_decoder (
     input logic [31:0] instruction,
     output logic [63:0] imm,
