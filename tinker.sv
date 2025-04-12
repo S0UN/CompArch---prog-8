@@ -1,6 +1,6 @@
 // Register File Module (Standalone)
 module register_file #(
-    parameter R31_INIT = 524288  // Parameter for initializing r31
+    parameter R31_INIT = 1024  // Parameter for initializing r31
 ) (
     input logic clk,
     input logic reset,
@@ -33,7 +33,7 @@ endmodule
 
 // Memory Unit Module (Standalone)
 module memory_unit #(
-    parameter MEMSIZE = 524288  // Parameter for memory size
+    parameter MEMSIZE = 1024  // Parameter for memory size
 ) (
     input logic clk,
     input logic reset,
@@ -86,7 +86,7 @@ module tinker_core (
     output logic hlt            // Halt output signal
 );
     // Parameters
-    parameter MEMSIZE = 524288;  // Memory size in bytes (example value)
+    parameter MEMSIZE = 1024;  // Memory size in bytes (example value)
 
     // State Enumeration
     typedef enum logic [2:0] {
