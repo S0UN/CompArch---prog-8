@@ -1,495 +1,359 @@
-// Top-Level Modul
 module tinker_core (
-    input logic clk,
-    input logic reset,
-    output logic hlt
+    input logic clk,            // Clock input
+    input logic reset,          // Reset input
+    output logic hlt            // Halt output signal
 );
-    localparam HALT_OPCODE = 5'b11111;
 
+    // **Parameters**
+    parameter MEMSIZE = 524288; // Memory size in bytes (example value)
+
+    // **State Enumeration**
     typedef enum logic [2:0] {
-        S_FETCH, S_DECODE, S_EXECUTE, S_MEMORY, S_WRITEBACK, S_HALTED
+        FETCH,      // Fetch instruction from memory
+        DECODE,     // Decode the instruction
+        EXECUTE,    // Execute ALU operation or compute address
+        MEMORY,     // Perform memory read/write
+        WRITEBACK,  // Write result back to register
+        PC_UPDATE,  // Update program counter (e.g., for return)
+        HALT        // Halt state
     } state_t;
 
-    logic [63:0] pc_current;
-    logic [63:0] pc_next;
-    logic        pc_write_enable;
+    // **Internal Signals**
+    logic [63:0] PC, next_pc;           // Program counter and next PC value
+    logic [31:0] IR;                    // Instruction register
+    logic [63:0] A, B;                  // Source operand registers
+    logic [63:0] ALUOut;                // ALU output
+    logic [63:0] MDR;                   // Memory data register
+    state_t state, next_state;          // Current and next state
+    logic pc_write;                     // PC update enable
+    logic hlt_reg;                      // Halt signal register
+    assign hlt = hlt_reg;               // Output halt signal
 
-    logic [31:0] instr_word;
-    logic [31:0] instr_reg;
-    logic [4:0]  dest_reg;
-    logic [4:0]  src_reg1;
-    logic [4:0]  src_reg2;
-    logic [4:0]  opcode;
-    logic [63:0] imm_value;
+    // **Instruction Fields**
+    logic [4:0] opcode, dest, src1, src2; // Opcode and register fields
+    logic [11:0] L_field;                 // Immediate field
+    logic [63:0] imm;                     // Extended immediate value
 
-    logic [63:0] dest_val;
-    logic [63:0] src_val1;
-    logic [63:0] src_val2;
-    logic [63:0] stack_ptr;
-    logic        reg_write;
-    logic        mem_to_reg;
+    // **Control Signals**
+    logic [4:0] read_reg1, read_reg2, write_reg; // Register file addresses
+    logic reg_write;                             // Register write enable
+    logic [63:0] reg_data1, reg_data2, r31;     // Register file data
+    logic [1:0] size;                            // Memory access size (2: 32-bit, 3: 64-bit)
+    logic mem_read, mem_write;                   // Memory read/write enables
+    logic [63:0] mem_addr, mem_data_in, mem_data_out; // Memory interface signals
 
-    logic [63:0] alu_operand2;
-    logic [63:0] alu_output;
-    logic [63:0] alu_out_reg;
+    // **Instruction Type Flags**
+    logic is_alu_reg, is_alu_imm, is_load, is_store, is_branch, is_call, is_return, is_halt;
+    logic B_src;                        // Source for B (0: register, 1: immediate)
 
-    logic [63:0] mem_addr;
-    logic [63:0] mem_data_in;
-    logic [63:0] mem_data_out;
-    logic [63:0] mem_data_reg;
-    logic        mem_read;
-    logic        mem_write;
-    logic        ir_write;
-    logic [63:0] memory_unit_address;
+    // **Register File Module**
+    module register_file (
+        input logic clk,
+        input logic reset,
+        input logic [4:0] read_addr1,   // First read address
+        input logic [4:0] read_addr2,   // Second read address
+        input logic [4:0] write_addr,   // Write address
+        input logic write_en,           // Write enable
+        input logic [63:0] write_data,  // Data to write
+        output logic [63:0] read_data1, // First read data
+        output logic [63:0] read_data2, // Second read data
+        output logic [63:0] r31         // Value of register 31 (stack pointer)
+    );
+        logic [63:0] registers [0:31];  // 32 registers, 64 bits each
 
-    logic        is_branch_instr;
-    logic        branch_taken;
+        // **Register File Outputs**
+        assign read_data1 = registers[read_addr1];
+        assign read_data2 = registers[read_addr2];
+        assign r31 = registers[31];
 
-    always @(posedge clk or posedge reset) begin
-        if (reset)
-            current_state <= S_FETCH;
-        else if (current_state == S_HALTED)
-             current_state <= S_HALTED;
-        else
-            current_state <= next_state;
-    end
-
-    always @(*) begin
-        next_state = current_state;
-        case (current_state)
-            S_FETCH:   next_state = S_DECODE;
-            S_DECODE: begin
-                if (opcode == HALT_OPCODE)
-                    next_state = S_HALTED;
-                else
-                    next_state = S_EXECUTE;
+        // **Register File Logic**
+        always_ff @(posedge clk or posedge reset) begin
+            if (reset) begin
+                // Initialize registers on reset
+                for (int i = 0; i < 31; i++) registers[i] <= 64'h0;
+                registers[31] <= MEMSIZE; // r31 = MEMSIZE
+            end else if (write_en) begin
+                registers[write_addr] <= write_data; // Write to register (including r0)
             end
-            S_EXECUTE: begin
-                 if (is_memory_operation(opcode))
-                     next_state = S_MEMORY;
-                 else if (is_branch_instr)
-                     next_state = S_FETCH;
-                 else
-                     next_state = S_WRITEBACK;
-            end
-            S_MEMORY:    next_state = S_WRITEBACK;
-            S_WRITEBACK: next_state = S_FETCH;
-            S_HALTED:    next_state = S_HALTED;
-            default:     next_state = S_FETCH;
-        endcase
-    end
+        end
+    endmodule
 
-    always @(*) begin
-        ir_write = 1'b0;
-        pc_write_enable = 1'b0;
-        reg_write = 1'b0;
-        mem_read = 1'b0;
-        mem_write = 1'b0;
-        mem_to_reg = 1'b0;
-        hlt = 1'b0;
-        memory_unit_address = mem_addr;
-        case (current_state)
-            S_FETCH: begin
-                ir_write = 1'b1;
-                mem_read = 1'b1;
-                memory_unit_address = pc_current;
-            end
-            S_DECODE: begin
-            end
-            S_EXECUTE: begin
-                if (is_branch_instr && branch_taken)
-                    pc_write_enable = 1'b1;
-            end
-            S_MEMORY: begin
-                if (is_load_operation(opcode))
-                    mem_read = 1'b1;
-                else if (is_store_operation(opcode))
-                    mem_write = 1'b1;
-            end
-            S_WRITEBACK: begin
-                if (!is_store_operation(opcode) && !is_branch_no_writeback(opcode) && opcode != HALT_OPCODE)
-                    reg_write = 1'b1;
-                if (is_load_operation(opcode))
-                    mem_to_reg = 1'b1;
-                else
-                    mem_to_reg = 1'b0;
-                if (!branch_taken)
-                    pc_write_enable = 1'b1;
-            end
-            S_HALTED: begin
-                hlt = 1'b1;
-            end
-            default: begin
-            end
-        endcase
-    end
-
-    function logic is_memory_operation(logic [4:0] op);
-         return (op == 5'b10000 || op == 5'b10011 || op == 5'b01100 || op == 5'b01101);
-    endfunction
-    function logic is_load_operation(logic [4:0] op);
-         return (op == 5'b10000 || op == 5'b01101);
-    endfunction
-    function logic is_store_operation(logic [4:0] op);
-        return (op == 5'b10011 || op == 5'b01100);
-    endfunction
-    function logic is_branch_no_writeback(logic [4:0] op);
-         return (op >= 5'b01000 && op <= 5'b01110) || op == HALT_OPCODE;
-    endfunction
-
-    always @(posedge clk or posedge reset) begin
-        if (reset)
-            instr_reg <= 32'b0;
-        else if (ir_write)
-            instr_reg <= instr_word;
-    end
-
-    always @(posedge clk or posedge reset) begin
-        if (reset)
-            mem_data_reg <= 64'b0;
-        else if (current_state == S_MEMORY && mem_read)
-             mem_data_reg <= mem_data_out;
-    end
-
-    always @(posedge clk or posedge reset) begin
-       if (reset)
-           alu_out_reg <= 64'b0;
-       else if (current_state == S_EXECUTE)
-            alu_out_reg <= alu_output;
-    end
-
-    fetch_unit fetch (
+    // **Instantiate Register File**
+    register_file reg_file (
         .clk(clk),
         .reset(reset),
-        .pc_in(pc_next),
-        .pc_out(pc_current),
-        .pc_write(pc_write_enable)
+        .read_addr1(read_reg1),
+        .read_addr2(read_reg2),
+        .write_addr(write_reg),
+        .write_en(reg_write),
+        .write_data(is_load ? MDR : ALUOut), // Select write data: MDR for load, ALUOut otherwise
+        .read_data1(reg_data1),
+        .read_data2(reg_data2),
+        .r31(r31)
     );
 
-    memory_unit memory (
-        .program_counter(pc_current),
+    // **Memory Unit Module**
+    module memory_unit (
+        input logic clk,
+        input logic reset,
+        input logic [63:0] addr,    // Memory address
+        input logic [1:0] size,     // Access size (2: 32-bit, 3: 64-bit)
+        input logic read_en,        // Read enable
+        input logic write_en,       // Write enable
+        input logic [63:0] data_in, // Data to write
+        output logic [63:0] data_out // Data read
+    );
+        logic [7:0] bytes [0:MEMSIZE-1]; // Byte-addressable memory
+
+        // **Memory Write Logic**
+        always_ff @(posedge clk or posedge reset) begin
+            if (reset) begin
+                // Memory could be initialized here if needed (left empty for simplicity)
+            end else if (write_en) begin
+                case (size)
+                    3: begin // 64-bit write
+                        bytes[addr]   <= data_in[7:0];
+                        bytes[addr+1] <= data_in[15:8];
+                        bytes[addr+2] <= data_in[23:16];
+                        bytes[addr+3] <= data_in[31:24];
+                        bytes[addr+4] <= data_in[39:32];
+                        bytes[addr+5] <= data_in[47:40];
+                        bytes[addr+6] <= data_in[55:48];
+                        bytes[addr+7] <= data_in[63:56];
+                    end
+                endcase
+            end
+        end
+
+        // **Memory Read Logic**
+        always_comb begin
+            data_out = 64'h0;
+            if (read_en) begin
+                case (size)
+                    2: data_out = {32'h0, bytes[addr+3], bytes[addr+2], bytes[addr+1], bytes[addr]}; // 32-bit read
+                    3: data_out = {bytes[addr+7], bytes[addr+6], bytes[addr+5], bytes[addr+4],
+                                   bytes[addr+3], bytes[addr+2], bytes[addr+1], bytes[addr]}; // 64-bit read
+                endcase
+            end
+        end
+    endmodule
+
+    // **Instantiate Memory Unit**
+    memory_unit mem (
         .clk(clk),
         .reset(reset),
+        .addr(mem_addr),
+        .size(size),
         .read_en(mem_read),
         .write_en(mem_write),
         .data_in(mem_data_in),
-        .address(memory_unit_address),
-        .data_out(mem_data_out),
-        .instruction(instr_word)
+        .data_out(mem_data_out)
     );
 
-    control_unit ctrl (
-        .operation(opcode),
-        .dest_in(dest_val),
-        .src_in1(src_val1),
-        .src_in2(src_val2),
-        .immediate(imm_value),
-        .current_pc(pc_current),
-        .memory_data(mem_data_reg),
-        .next_pc(pc_next),
-        .is_branch(is_branch_instr),
-        .branch_taken(branch_taken)
-    );
-
-    mem_handler mem_mgr (
-        .op(opcode),
-        .dest(dest_val),
-        .src(src_val1),
-        .imm(imm_value),
-        .pc(pc_current),
-        .r31(stack_ptr),
-        .addr_out(mem_addr),
-        .data_out(mem_data_in)
-    );
-
-    inst_decoder dec (
-        .instruction(instr_reg),
-        .imm(imm_value),
-        .dest(dest_reg),
-        .src1(src_reg1),
-        .src2(src_reg2),
-        .opcode(opcode)
-    );
-
-    reg_file_bank reg_file (
-        .clk(clk),
-        .reset(reset),
-        .write_en(reg_write),
-        .write_data(mem_to_reg ? mem_data_reg : alu_out_reg),
-        .addr1(src_reg1),
-        .addr2(src_reg2),
-        .write_addr(dest_reg),
-        .data1(src_val1),
-        .data2(src_val2),
-        .data_dest(dest_val),
-        .stack(stack_ptr)
-    );
-
-    reg_lit_mux mux (
-        .op(opcode),
-        .reg_val(src_val2),
-        .lit_val(imm_value),
-        .out(alu_operand2)
-    );
-
-    alu_unit alu (
-        .ctrl(opcode),
-        .in1(src_val1),
-        .in2(alu_operand2),
-        .out(alu_output)
-    );
-
-endmodule
-
-// Supporting Modules (MUST ALSO BE MODIFIED for always_comb/always_ff)
-
-// Modified Fetch Unit (Using always @)
-module fetch_unit (
-    input logic clk,
-    input logic reset,
-    input logic pc_write,
-    input logic [63:0] pc_in,
-    output logic [63:0] pc_out
-);
-    logic [63:0] pc_reg;
-    assign pc_out = pc_reg;
-    always @(posedge clk or posedge reset) begin
-        if (reset)
-            pc_reg <= 64'h2000;
-        else if (pc_write)
-            pc_reg <= pc_in;
-    end
-endmodule
-
-// Modified Memory Unit
-module memory_unit (
-    input logic [63:0] program_counter,
-    input logic clk,
-    input logic reset,
-    input logic read_en,
-    input logic write_en,
-    input logic [63:0] data_in,
-    input logic [63:0] address,
-    output logic [63:0] data_out,
-    output logic [31:0] instruction
-);
-    localparam MEM_SIZE_BYTES = 524288;
-    logic [7:0] bytes [0:MEM_SIZE_BYTES-1];
-    integer j, k;
-    assign instruction[7:0]   = (address + 0 < MEM_SIZE_BYTES) ? bytes[address + 0] : 8'h0;
-    assign instruction[15:8]  = (address + 1 < MEM_SIZE_BYTES) ? bytes[address + 1] : 8'h0;
-    assign instruction[23:16] = (address + 2 < MEM_SIZE_BYTES) ? bytes[address + 2] : 8'h0;
-    assign instruction[31:24] = (address + 3 < MEM_SIZE_BYTES) ? bytes[address + 3] : 8'h0;
-    assign data_out[7:0]   = (address + 0 < MEM_SIZE_BYTES) ? bytes[address + 0] : 8'h0;
-    assign data_out[15:8]  = (address + 1 < MEM_SIZE_BYTES) ? bytes[address + 1] : 8'h0;
-    assign data_out[23:16] = (address + 2 < MEM_SIZE_BYTES) ? bytes[address + 2] : 8'h0;
-    assign data_out[31:24] = (address + 3 < MEM_SIZE_BYTES) ? bytes[address + 3] : 8'h0;
-    assign data_out[39:32] = (address + 4 < MEM_SIZE_BYTES) ? bytes[address + 4] : 8'h0;
-    assign data_out[47:40] = (address + 5 < MEM_SIZE_BYTES) ? bytes[address + 5] : 8'h0;
-    assign data_out[55:48] = (address + 6 < MEM_SIZE_BYTES) ? bytes[address + 6] : 8'h0;
-    assign data_out[63:56] = (address + 7 < MEM_SIZE_BYTES) ? bytes[address + 7] : 8'h0;
-    always @(posedge clk or posedge reset) begin
+    // **Sequential Logic (State and PC Updates)**
+    always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            for (j = 0; j < MEM_SIZE_BYTES; j = j + 1)
-                bytes[j] <= 8'h0;
-        end
-        else if (write_en) begin
-            for (k = 0; k < 8; k = k + 1) begin
-                 if ((address + k) < MEM_SIZE_BYTES) begin
-                    bytes[address + k] <= data_in[8*k +: 8];
-                 end
+            state <= FETCH;         // Start in FETCH state
+            PC <= 64'h2000;         // Initial PC value
+            hlt_reg <= 0;           // Clear halt signal
+            IR <= 32'h0;            // Clear instruction register
+            A <= 64'h0;             // Clear operand A
+            B <= 64'h0;             // Clear operand B
+            ALUOut <= 64'h0;        // Clear ALU output
+            MDR <= 64'h0;           // Clear memory data register
+        end else begin
+            state <= next_state;    // Update state
+            if (state == FETCH && mem_read) IR <= mem_data_out[31:0]; // Load instruction
+            if (state == DECODE) begin
+                A <= reg_data1;     // Load first operand
+                B <= (B_src == 0) ? reg_data2 : imm; // Load second operand (register or immediate)
             end
+            if (state == MEMORY && mem_read) MDR <= mem_data_out; // Load memory data
+            if (state == EXECUTE) ALUOut <= ALUOut_next; // Latch ALU result
+            if (pc_write) PC <= next_pc; // Update PC
+            if (state == DECODE && is_halt) hlt_reg <= 1; // Set halt signal
         end
     end
-endmodule
 
-module control_unit (
-    input logic [4:0] operation,
-    input logic [63:0] dest_in,
-    input logic [63:0] src_in1,
-    input logic [63:0] src_in2,
-    input logic [63:0] immediate,
-    input logic [63:0] current_pc,
-    input logic [63:0] memory_data,
-    output logic [63:0] next_pc,
-    output logic is_branch,
-    output logic branch_taken
-);
-    logic branch_condition_met;
-    assign is_branch = (operation >= 5'b01000 && operation <= 5'b01110);
-    always @(*) begin
-        case(operation)
-            5'b01011: branch_condition_met = (src_in1 != 0);
-            5'b01110: branch_condition_met = ($signed(src_in1) > $signed(src_in2));
-            default: branch_condition_met = 1'b1;
-        endcase
-        branch_taken = 1'b0;
-        next_pc = current_pc + 4;
-        case (operation)
-            5'b01000: begin
-                        next_pc = dest_in;
-                        branch_taken = 1'b1;
-                     end
-            5'b01100: begin
-                        next_pc = dest_in;
-                        branch_taken = 1'b1;
-                     end
-            5'b01101: begin
-                        next_pc = memory_data;
-                        branch_taken = 1'b1;
-                     end
-            5'b01001: begin
-                        next_pc = current_pc + dest_in;
-                        branch_taken = 1'b1;
-                     end
-            5'b01010: begin
-                        next_pc = current_pc + immediate;
-                        branch_taken = 1'b1;
-                     end
-            5'b01011: begin
-                        if (branch_condition_met) begin
-                            next_pc = dest_in;
-                            branch_taken = 1'b1;
-                        end
-                     end
-            5'b01110: begin
-                        if (branch_condition_met) begin
-                            next_pc = dest_in;
-                            branch_taken = 1'b1;
-                        end
-                     end
-            default: begin
+    // **ALU Output (Combinational Logic)**
+    logic [63:0] ALUOut_next;
+    always_comb begin
+        ALUOut_next = ALUOut; // Default to current value
+        if (state == EXECUTE) begin
+            case (opcode)
+                5'h18, 5'h19: ALUOut_next = A + B; // add, addi
+                5'h1a, 5'h1b: ALUOut_next = A - B; // sub, subi
+                5'h1c: ALUOut_next = A * B; // mul
+                5'h1d: ALUOut_next = A / B; // div
+                5'h00: ALUOut_next = A & B; // and
+                5'h01: ALUOut_next = A | B; // or
+                5'h02: ALUOut_next = A ^ B; // xor
+                5'h03: ALUOut_next = ~A;    // not
+                5'h04, 5'h05: ALUOut_next = A >> B; // shftr, shftri
+                5'h06, 5'h07: ALUOut_next = A << B; // shftl, shftli
+                5'h11: ALUOut_next = A;     // mov $r_d, $r_s
+                5'h12: ALUOut_next = B;     // mov $r_d, L (immediate)
+                // Simplified floating-point operations
+                5'h14: ALUOut_next = $realtobits($bitstoreal(A) + $bitstoreal(B)); // addf
+                5'h15: ALUOut_next = $realtobits($bitstoreal(A) - $bitstoreal(B)); // subf
+                5'h16: ALUOut_next = $realtobits($bitstoreal(A) * $bitstoreal(B)); // mulf
+                5'h17: ALUOut_next = $realtobits($bitstoreal(A) / $bitstoreal(B)); // divf
+                default: ALUOut_next = A + B; // Default to add
+            endcase
+            // Memory address calculation for load/store/call/return
+            if (is_load || is_store || is_call || is_return) ALUOut_next = A + imm;
+        end
+    end
+
+    // **State Machine (Combinational Logic)**
+    always_comb begin
+        // **Default Assignments**
+        next_state = state;
+        pc_write = 0;
+        mem_read = 0;
+        mem_write = 0;
+        reg_write = 0;
+        size = 3; // Default to 64-bit access
+        mem_addr = 64'h0;
+        mem_data_in = 64'h0;
+        read_reg1 = 5'h0;
+        read_reg2 = 5'h0;
+        write_reg = 5'h0;
+        next_pc = PC + 4; // Default PC increment
+        B_src = 0;
+        imm = 64'h0;
+
+        // **Instruction Decoding**
+        opcode = IR[31:27]; // 5-bit opcode
+        dest = IR[26:22];   // Destination register
+        src1 = IR[21:17];   // First source register
+        src2 = IR[16:12];   // Second source register
+        L_field = IR[11:0]; // Immediate field
+
+        // **Instruction Type Detection**
+        is_alu_reg = (opcode == 5'h18 || opcode == 5'h1a || opcode == 5'h1c || opcode == 5'h1d ||
+                      opcode == 5'h00 || opcode == 5'h01 || opcode == 5'h02 || opcode == 5'h03 ||
+                      opcode == 5'h04 || opcode == 5'h06);
+        is_alu_imm = (opcode == 5'h19 || opcode == 5'h1b || opcode == 5'h05 || opcode == 5'h07 ||
+                      opcode == 5'h12);
+        is_load = (opcode == 5'h10);
+        is_store = (opcode == 5'h13);
+        is_branch = (opcode >= 5'h08 && opcode <= 5'h0b) || (opcode == 5'h0e);
+        is_call = (opcode == 5'h0c);
+        is_return = (opcode == 5'h0d);
+        is_halt = (opcode == 5'h0f && L_field == 12'h0); // Halt instruction
+
+        // **State Transitions**
+        case (state)
+            FETCH: begin
+                mem_addr = PC;
+                size = 2; // 32-bit instruction fetch
+                mem_read = 1;
+                next_state = DECODE;
+            end
+
+            DECODE: begin
+                imm = {52'h0, L_field}; // Zero-extend by default
+                if (opcode == 5'h0a) imm = {{52{L_field[11]}}, L_field}; // Sign-extend for brr L
+
+                // **Set Register Read Addresses**
+                if (is_alu_reg) begin
+                    read_reg1 = src1;
+                    read_reg2 = src2;
+                end else if (is_alu_imm) begin
+                    read_reg1 = dest;
+                    B_src = 1;
+                end else if (is_load) begin
+                    read_reg1 = src1;
+                    B_src = 1;
+                end else if (is_store) begin
+                    read_reg1 = src1; // Data to store
+                    read_reg2 = dest; // Base address
+                end else if (is_branch) begin
+                    case (opcode)
+                        5'h08: read_reg1 = dest; // br $r_d
+                        5'h09: read_reg1 = dest; // brr $r_d
+                        5'h0a: ; // brr L (immediate)
+                        5'h0b: begin read_reg1 = src1; read_reg2 = dest; end // brnz
+                        5'h0e: begin read_reg1 = src1; read_reg2 = src2; end // brgt
+                    endcase
+                    if (opcode == 5'h0a) B_src = 1;
+                end else if (is_call) begin
+                    read_reg1 = dest; // Target address
+                    read_reg2 = 5'h1f; // r31 (stack pointer)
+                end else if (is_return) begin
+                    read_reg1 = 5'h1f; // r31 (stack pointer)
+                    B_src = 1;
+                    imm = -64'd8; // Offset for return address
+                end
+
+                next_state = is_halt ? HALT : EXECUTE;
+            end
+
+            EXECUTE: begin
+                if (is_alu_reg || is_alu_imm) begin
+                    write_reg = dest;
+                    next_state = WRITEBACK;
+                end else if (is_load || is_store) begin
+                    next_state = MEMORY;
+                end else if (is_branch) begin
+                    case (opcode)
+                        5'h08: next_pc = A; // br $r_d
+                        5'h09: next_pc = PC + A; // brr $r_d
+                        5'h0a: next_pc = PC + B; // brr L
+                        5'h0b: next_pc = (A != 0) ? reg_data2 : PC; // brnz
+                        5'h0e: next_pc = (A > B) ? reg_data2 : PC; // brgt
+                    endcase
+                    pc_write = 1;
+                    next_state = FETCH;
+                end else if (is_call) begin
+                    mem_addr = r31 - 8; // Stack pointer - 8
+                    mem_data_in = PC + 4; // Save return address
+                    next_state = MEMORY;
+                end else if (is_return) begin
+                    mem_addr = A - 8; // Read return address from stack
+                    next_state = MEMORY;
+                end
+            end
+
+            MEMORY: begin
+                if (is_load) begin
+                    mem_addr = ALUOut;
+                    mem_read = 1;
+                    next_state = WRITEBACK;
+                end else if (is_store) begin
+                    mem_addr = ALUOut;
+                    mem_write = 1;
+                    mem_data_in = A;
+                    next_state = FETCH;
+                    pc_write = 1;
+                end else if (is_call) begin
+                    mem_write = 1;
+                    next_pc = A; // Jump to target
+                    pc_write = 1;
+                    next_state = FETCH;
+                end else if (is_return) begin
+                    mem_read = 1;
+                    next_state = PC_UPDATE;
+                end
+            end
+
+            WRITEBACK: begin
+                reg_write = 1;
+                write_reg = dest;
+                next_state = FETCH;
+                pc_write = 1;
+            end
+
+            PC_UPDATE: begin
+                next_pc = MDR; // Load return address
+                pc_write = 1;
+                next_state = FETCH;
+            end
+
+            HALT: begin
+                next_state = HALT; // Remain halted until reset
             end
         endcase
-    end
-endmodule
-
-// Modified Memory Handler=
-module mem_handler (
-    input logic [4:0] op,
-    input logic [63:0] dest,
-    input logic [63:0] src,
-    input logic [63:0] imm,
-    input logic [63:0] pc,
-    input logic [63:0] r31,
-    output logic [63:0] addr_out,
-    output logic [63:0] data_out
-);
-    always @(*) begin
-        addr_out = 64'h0;
-        data_out = 64'h0;
-        case (op)
-            5'b01100: begin addr_out = r31 - 8; data_out = pc + 4; end
-            5'b01101: begin addr_out = r31 - 8; data_out = 64'h0; end
-            5'b10000: begin addr_out = src + imm; data_out = 64'h0; end
-            5'b10011: begin addr_out = dest + imm; data_out = src; end
-            default: begin end
-        endcase
-    end
-endmodule
-
-// Modified Register File (Using always @) 
-module reg_file_bank (
-    input logic clk,
-    input logic reset,
-    input logic write_en,
-    input logic [63:0] write_data,
-    input logic [4:0] addr1,
-    input logic [4:0] addr2,
-    input logic [4:0] write_addr,
-    output logic [63:0] data1,
-    output logic [63:0] data2,
-    output logic [63:0] data_dest,
-    output logic [63:0] stack
-);
-    logic [63:0] registers [0:31];
-    integer i;
-    localparam MEMSIZE = 64'd524288;
-    assign data1 = registers[addr1];
-    assign data2 = registers[addr2];
-    assign data_dest = registers[write_addr];
-    assign stack = registers[31];
-    always @(posedge clk or posedge reset) begin
-        if (reset) begin
-            for (i = 0; i < 31; i = i + 1) begin registers[i] <= 64'h0; end
-            registers[31] <= MEMSIZE;
-        end else if (write_en && write_addr != 5'b0) begin
-            registers[write_addr] <= write_data;
-        end
-    end
-endmodule
-
-module alu_unit (
-    input logic [4:0] ctrl,
-    input logic [63:0] in1,
-    input logic [63:0] in2,
-    output logic [63:0] out
-);
-    always @(*) begin
-        case (ctrl)
-            5'b11000: out = in1 + in2;
-            5'b11001: out = in1 + in2;
-            5'b11010: out = in1 - in2;
-            5'b11011: out = in1 - in2;
-            5'b11100: out = in1 * in2;
-            5'b11101: out = (in2 == 0) ? 64'h0 : in1 / in2;
-            5'b00000: out = in1 & in2;
-            5'b00001: out = in1 | in2;
-            5'b00010: out = in1 ^ in2;
-            5'b00011: out = ~in1;
-            5'b00100: out = in1 >> in2;
-            5'b00101: out = $signed(in1) >>> in2;
-            5'b00110: out = in1 << in2;
-            5'b00111: out = in1 << in2;
-            5'b10001: out = in1;
-            5'b10010: out = in2;
-            default: out = 64'h0;
-        endcase
-    end
-endmodule
-
-// Instruction Decoder 
-module inst_decoder (
-    input logic [31:0] instruction,
-    output logic [63:0] imm,
-    output logic [4:0] dest,
-    output logic [4:0] src1,
-    output logic [4:0] src2,
-    output logic [4:0] opcode
-);
-    logic [11:0] imm_raw;
-    logic [4:0] opcode_internal;
-    assign imm_raw = instruction[11:0];
-    assign opcode_internal = instruction[31:27];
-    assign opcode = opcode_internal;
-    assign imm = {{52{imm_raw[11]}}, imm_raw};
-    assign dest = instruction[26:22];
-    assign src2 = instruction[16:12];
-    always @(*) begin
-        src1 = instruction[21:17];
-        if (opcode_internal == 5'b11001 || opcode_internal == 5'b11011 ||
-            opcode_internal == 5'b01010 || opcode_internal == 5'b01011 ||
-            opcode_internal == 5'b00101 || opcode_internal == 5'b00111)
-        begin
-            src1 = instruction[26:22];
-        end
-    end
-endmodule
-
-module reg_lit_mux (
-    input logic [4:0] op,
-    input logic [63:0] reg_val,
-    input logic [63:0] lit_val,
-    output logic [63:0] out
-);
-    always @(*) begin
-        if (op == 5'b11001 || op == 5'b11011 ||
-            op == 5'b00101 || op == 5'b00111 ||
-            op == 5'b10010 ||
-            op == 5'b10000 || op == 5'b10011 ||
-            op == 5'b01010 || op == 5'b01011)
-            out = lit_val;
-        else
-            out = reg_val;
     end
 endmodule
