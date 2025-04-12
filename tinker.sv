@@ -1,6 +1,6 @@
 // Register File Module (Standalone)
 module register_file #(
-    parameter R31_INIT = 1024  // Parameter for initializing r31
+    parameter R31_INIT = 524288  // Parameter for initializing r31
 ) (
     input logic clk,
     input logic reset,
@@ -33,7 +33,7 @@ endmodule
 
 // Memory Unit Module (Standalone)
 module memory_unit #(
-    parameter MEMSIZE = 1024  // Parameter for memory size
+    parameter MEMSIZE = 524288  // Parameter for memory size
 ) (
     input logic clk,
     input logic reset,
@@ -86,7 +86,7 @@ module tinker_core (
     output logic hlt            // Halt output signal
 );
     // Parameters
-    parameter MEMSIZE = 1024;  // Memory size in bytes (example value)
+    parameter MEMSIZE = 524288;  // Memory size in bytes (example value)
 
     // State Enumeration
     typedef enum logic [2:0] {
@@ -223,7 +223,7 @@ module tinker_core (
         read_reg2 = 5'h0;
         write_reg = 5'h0;
         next_pc = PC + 4; // Default PC increment
-        B_src = 0;
+        B_src = 1'b1; // Use 1-bit binary '1'
         imm = 64'h0;
 
         // Instruction Decoding
@@ -286,11 +286,11 @@ module tinker_core (
                     read_reg2 = 5'h1f; // r31 (stack pointer)
                 end else if (is_return) begin
                     read_reg1 = 5'h1f; // r31 (stack pointer)
-                    B_src = 1;
+                    B_src = 1'b1;
                     imm = -64'd8; // Offset for return address
                 end
 
-                next_state = is_halt ? HALT : EXECUTE;
+                next_state = state_t'(is_halt ? HALT : EXECUTE);
             end
 
             EXECUTE: begin

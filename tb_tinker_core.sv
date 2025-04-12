@@ -1,8 +1,10 @@
+// Corrected Testbench for Tinker Core
 module tb_tinker_core;
     // Declare signals
     logic clk, reset, hlt;
 
     // Instantiate the unit under test (UUT)
+    // Assuming 'tinker_core' module is defined in tinker.sv
     tinker_core uut (
         .clk(clk),
         .reset(reset),
@@ -21,13 +23,16 @@ module tb_tinker_core;
 
     // Memory initialization: Load program from a hex file
     initial begin
-        $readmemh("program.hex", uut.memory.bytes);
+        // CORRECTED: Use 'mem', the instance name of the memory_unit inside tinker_core
+        // The path is uut (tinker_core instance) -> mem (memory_unit instance) -> bytes (memory array)
+        $readmemh("program.hex", uut.mem.bytes);
     end
 
     // Monitor key signals for debugging
     initial begin
-        $monitor("Time: %0t | PC: %h | Instruction: %h | HLT: %b", 
-                 $time, uut.pc_current, uut.instr_word, hlt);
+        // CORRECTED: Use the correct internal signal names 'PC' and 'IR' from tinker_core
+        $monitor("Time: %0t | PC: %h | Instruction: %h | HLT: %b",
+                 $time, uut.PC, uut.IR, hlt);
     end
 
     // Stop simulation when halt is asserted
