@@ -137,31 +137,102 @@ module tinker_core (
                 IF_ID_reg.instruction <= instr_word;
             end
             // ID_EX: Latch Decode outputs
-            if (current_state == S_DECODE) begin
-                ID_EX_reg.mem_to_reg <= (opcode == 5'b10000); // Set for load instructions
-                ID_EX_reg.pc <= IF_ID_reg.pc;
-                ID_EX_reg.opcode <= opcode;
-                ID_EX_reg.rd <= dest_reg;
-                ID_EX_reg.rs1_val <= src_val1;
-                ID_EX_reg.rs2_val <= src_val2;
-                ID_EX_reg.imm <= imm_value;
-                ID_EX_reg.reg_write <= (opcode != HALT_OPCODE);
-                ID_EX_reg.mem_read <= (opcode == 5'b10000); // Example load
-                ID_EX_reg.mem_write <= (opcode == 5'b10011); // Example store
-                ID_EX_reg.alu_src <= (opcode >= 5'b00100 && opcode <= 5'b00111); // Immediate ops
-                ID_EX_reg.alu_op <= opcode;
-                ID_EX_reg.is_branch <= (opcode >= 5'b01000 && opcode <= 5'b01110);
-            end
+           if (current_state == S_DECODE) begin
+    ID_EX_reg.mem_to_reg <= (opcode == 5'b10000); // Set for load instructions
+    ID_EX_reg.pc <= IF_ID_reg.pc;
+    ID_EX_reg.opcode <= opcode;
+    ID_EX_reg.rd <= dest_reg;
+    ID_EX_reg.rs1_val <= src_val1;
+    ID_EX_reg.rs2_val <= src_val2;
+    ID_EX_reg.imm <= imm_value;
+    case (opcode)
+        // ALU R-type instructions
+        5'h18: begin // add
+            ID_EX_reg.reg_write <= 1; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h18; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        5'h1a: begin // sub
+            ID_EX_reg.reg_write <= 1; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h1a; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        5'h1c: begin // mul
+            ID_EX_reg.reg_write <= 1; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h1c; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        // ALU I-type instructions
+        5'h19: begin // addi
+            ID_EX_reg.reg_write <= 1; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 1; ID_EX_reg.alu_op <= 5'h19; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        5'h1b: begin // subi
+            ID_EX_reg.reg_write <= 1; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 1; ID_EX_reg.alu_op <= 5'h1b; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        // Memory Operations
+        5'h10: begin // load (mov $r_d, ($r_s)(L))
+            ID_EX_reg.reg_write <= 1; ID_EX_reg.mem_read <= 1; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 1; ID_EX_reg.alu_op <= 5'h18; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 1;
+        end
+        5'h13: begin // store (mov ($r_d)(L), $r_s)
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 1;
+            ID_EX_reg.alu_src <= 1; ID_EX_reg.alu_op <= 5'h18; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        // Branches
+        5'h08: begin // br $r_d
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h00; ID_EX_reg.is_branch <= 1;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        5'h0a: begin // brr L
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h00; ID_EX_reg.is_branch <= 1;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        5'h0b: begin // brnz $r_d, $r_s
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h00; ID_EX_reg.is_branch <= 1;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        5'h0c: begin // call $r_d
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 1;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h00; ID_EX_reg.is_branch <= 1;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        5'h0d: begin // return
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 1; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h00; ID_EX_reg.is_branch <= 1;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        // Halt
+        5'h1f: begin // halt
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h00; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+        default: begin
+            ID_EX_reg.reg_write <= 0; ID_EX_reg.mem_read <= 0; ID_EX_reg.mem_write <= 0;
+            ID_EX_reg.alu_src <= 0; ID_EX_reg.alu_op <= 5'h00; ID_EX_reg.is_branch <= 0;
+            ID_EX_reg.mem_to_reg <= 0;
+        end
+    endcase
+end
             // EX_MEM: Latch Execute outputs
-            if (current_state == S_EXECUTE) begin
-                EX_MEM_reg.mem_to_reg <= ID_EX_reg.mem_to_reg;
-                EX_MEM_reg.alu_result <= (ID_EX_reg.mem_write || ID_EX_reg.is_branch) ? mem_addr : alu_output;
-                EX_MEM_reg.rs2_val <= (ID_EX_reg.mem_write) ? mem_data : ID_EX_reg.rs2_val; // For stores
-                EX_MEM_reg.rd <= ID_EX_reg.rd;
-                EX_MEM_reg.reg_write <= ID_EX_reg.reg_write;
-                EX_MEM_reg.mem_read <= ID_EX_reg.mem_read;
-                EX_MEM_reg.mem_write <= ID_EX_reg.mem_write;
-            end
+         if (current_state == S_EXECUTE) begin
+        EX_MEM_reg.mem_to_reg <= ID_EX_reg.mem_to_reg;
+        EX_MEM_reg.alu_result <= (ID_EX_reg.mem_write || ID_EX_reg.is_branch) ? mem_addr : alu_output;
+        EX_MEM_reg.rs2_val <= ID_EX_reg.rs2_val; // Pass rs2_val for stores
+        EX_MEM_reg.rd <= ID_EX_reg.rd;
+        EX_MEM_reg.reg_write <= ID_EX_reg.reg_write;
+        EX_MEM_reg.mem_read <= ID_EX_reg.mem_read;
+        EX_MEM_reg.mem_write <= ID_EX_reg.mem_write;
+     end
             // MEM_WB: Latch Memory outputs
             if (current_state == S_MEMORY) begin
                 MEM_WB_reg.mem_to_reg <= EX_MEM_reg.mem_to_reg;
@@ -230,10 +301,9 @@ module tinker_core (
         .branch_taken(branch_taken)
     );
 
-    // --- PC Update Logic ---
     assign pc_write_enable = (current_state == S_WRITEBACK) || 
-                             (current_state == S_EXECUTE && branch_taken);
-    assign pc_next = (current_state == S_EXECUTE && branch_taken) ? next_pc_branch : (pc_current + 4);
+                            (current_state == S_EXECUTE && branch_taken && current_state != S_HALTED);
+    assign pc_next = (current_state == S_EXECUTE && branch_taken) ? next_pc_branch : (pc_current + 64'd4);
 
     reg_file_bank reg_file (
         .clk(clk),
@@ -329,6 +399,7 @@ module memory_unit (
     end
 endmodule
 
+
 module control_unit (
     input logic [4:0] operation,
     input logic [63:0] dest_in,
@@ -341,55 +412,48 @@ module control_unit (
     output logic is_branch,
     output logic branch_taken
 );
-    // Mark only real branch opcodes as branches.
-    assign is_branch = (operation == 5'b01000 ||
-                        operation == 5'b01001 ||
-                        operation == 5'b01100 ||
-                        operation == 5'b01101 ||
-                        operation == 5'b01110); // Excludes 5'b01010 & 5'b01011
-
-    always @(*) begin // Changed from always_comb
-        // Default: sequential PC update
-        next_pc = current_pc + 4;
+    always @(*) begin
+        next_pc = current_pc + 64'd4;
         branch_taken = 1'b0;
+        is_branch = (operation >= 5'h08 && operation <= 5'h0e);
         case (operation)
-            5'b01000: begin 
-                        next_pc = dest_in; 
-                        branch_taken = 1'b1; 
-                     end
-            5'b01001: begin 
-                        next_pc = current_pc + dest_in; 
-                        branch_taken = 1'b1; 
-                     end
-            5'b01100: begin 
-                        next_pc = dest_in; 
-                        branch_taken = 1'b1; 
-                     end
-            5'b01101: begin 
-                        next_pc = memory_data; 
-                        branch_taken = 1'b1; 
-                     end
-            5'b01110: begin
-                        // You can add any branch condition here
-                        if ($signed(src_in1) > $signed(src_in2)) begin 
-                            next_pc = dest_in; 
-                            branch_taken = 1'b1; 
-                        end else begin 
-                            next_pc = current_pc + 4; 
-                            branch_taken = 1'b0; 
-                        end
-                     end
-            // For 5'b01010 (addi) and 5'b01011 (subi) no branch behavior
-            default: begin 
-                        next_pc = current_pc + 4; 
-                        branch_taken = 1'b0; 
-                     end
+            5'h08: begin // br $r_d
+                next_pc = dest_in;
+                branch_taken = 1'b1;
+            end
+            5'h0a: begin // brr L
+                next_pc = current_pc + immediate;
+                branch_taken = 1'b1;
+            end
+            5'h0b: begin // brnz $r_d, $r_s
+                if (src_in1 != 64'b0) begin
+                    next_pc = dest_in;
+                    branch_taken = 1'b1;
+                end
+            end
+            5'h0c: begin // call $r_d
+                next_pc = dest_in;
+                branch_taken = 1'b1;
+            end
+            5'h0d: begin // return
+                next_pc = memory_data;
+                branch_taken = 1'b1;
+            end
+            5'h0e: begin // brgt $r_d, $r_s, $r_t
+                if ($signed(src_in1) > $signed(src_in2)) begin
+                    next_pc = dest_in;
+                    branch_taken = 1'b1;
+                end
+            end
+            default: begin
+                next_pc = current_pc + 64'd4;
+                branch_taken = 1'b0;
+            end
         endcase
     end
 endmodule
 
 
-// Modified Memory Handler (Using always @(*))
 module mem_handler (
     input logic [4:0] op,
     input logic [63:0] dest,
@@ -400,15 +464,30 @@ module mem_handler (
     output logic [63:0] addr_out,
     output logic [63:0] data_out
 );
-    always @(*) begin // Changed from always_comb
+    always @(*) begin
         addr_out = 64'h0;
         data_out = 64'h0;
         case (op)
-            5'b01100: begin addr_out = r31 - 8; data_out = pc + 4; end
-            5'b01101: begin addr_out = r31 - 8; data_out = 64'h0; end
-            5'b10000: begin addr_out = src + imm; data_out = 64'h0; end
-            5'b10011: begin addr_out = dest + imm; data_out = src; end
-            default: begin /* Keep defaults */ end
+            5'h10: begin // load: Mem[$r_s + L]
+                addr_out = src + imm;
+                data_out = 64'h0;
+            end
+            5'h13: begin // store: Mem[$r_d + L] = $r_s
+                addr_out = dest + imm;
+                data_out = src;
+            end
+            5'h0c: begin // call
+                addr_out = r31 - 8;
+                data_out = pc + 64'd4;
+            end
+            5'h0d: begin // return
+                addr_out = r31 - 8;
+                data_out = 64'h0;
+            end
+            default: begin
+                addr_out = 64'h0;
+                data_out = 64'h0;
+            end
         endcase
     end
 endmodule
