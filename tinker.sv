@@ -1,13 +1,94 @@
+// Register File Module (Standalone)
+module register_file #(
+    parameter R31_INIT = 1024  // Parameter for initializing r31
+) (
+    input logic clk,
+    input logic reset,
+    input logic [4:0] read_addr1,   // First read address
+    input logic [4:0] read_addr2,   // Second read address
+    input logic [4:0] write_addr,   // Write address
+    input logic write_en,           // Write enable
+    input logic [63:0] write_data,  // Data to write
+    output logic [63:0] read_data1, // First read data
+    output logic [63:0] read_data2, // Second read data
+    output logic [63:0] r31         // Value of register 31 (stack pointer)
+);
+    logic [63:0] registers [0:31];  // 32 registers, 64 bits each
+
+    // Register File Outputs (Combinational Reads)
+    assign read_data1 = registers[read_addr1];
+    assign read_data2 = registers[read_addr2];
+    assign r31 = registers[31];
+
+    // Register File Logic (Sequential Writes)
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            for (int i = 0; i < 31; i++) registers[i] <= 64'h0;  // Reset registers 0-30 to 0
+            registers[31] <= R31_INIT;  // Initialize r31 with parameter
+        end else if (write_en) begin
+            registers[write_addr] <= write_data;  // Write data to specified register
+        end
+    end
+endmodule
+
+// Memory Unit Module (Standalone)
+module memory_unit #(
+    parameter MEMSIZE = 1024  // Parameter for memory size
+) (
+    input logic clk,
+    input logic reset,
+    input logic [63:0] addr,    // Memory address
+    input logic [1:0] size,     // Access size (2: 32-bit, 3: 64-bit)
+    input logic read_en,        // Read enable
+    input logic write_en,       // Write enable
+    input logic [63:0] data_in, // Data to write
+    output logic [63:0] data_out // Data read
+);
+    logic [7:0] bytes [0:MEMSIZE-1];  // Byte-addressable memory
+
+    // Memory Write Logic (Sequential)
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            // Memory could be initialized here if needed (left empty for simplicity)
+        end else if (write_en) begin
+            case (size)
+                3: begin  // 64-bit write
+                    bytes[addr]   <= data_in[7:0];
+                    bytes[addr+1] <= data_in[15:8];
+                    bytes[addr+2] <= data_in[23:16];
+                    bytes[addr+3] <= data_in[31:24];
+                    bytes[addr+4] <= data_in[39:32];
+                    bytes[addr+5] <= data_in[47:40];
+                    bytes[addr+6] <= data_in[55:48];
+                    bytes[addr+7] <= data_in[63:56];
+                end
+            endcase
+        end
+    end
+
+    // Memory Read Logic (Combinational)
+    always @(*) begin
+        data_out = 64'h0;  // Default output
+        if (read_en) begin
+            case (size)
+                2: data_out = {32'h0, bytes[addr+3], bytes[addr+2], bytes[addr+1], bytes[addr]};  // 32-bit read
+                3: data_out = {bytes[addr+7], bytes[addr+6], bytes[addr+5], bytes[addr+4],
+                               bytes[addr+3], bytes[addr+2], bytes[addr+1], bytes[addr]};  // 64-bit read
+            endcase
+        end
+    end
+endmodule
+
+// Tinker Core Module (Top-Level)
 module tinker_core (
     input logic clk,            // Clock input
     input logic reset,          // Reset input
     output logic hlt            // Halt output signal
 );
+    // Parameters
+    parameter MEMSIZE = 1024;  // Memory size in bytes (example value)
 
-    // **Parameters**
-    parameter MEMSIZE = 524288; // Memory size in bytes (example value)
-
-    // **State Enumeration**
+    // State Enumeration
     typedef enum logic [2:0] {
         FETCH,      // Fetch instruction from memory
         DECODE,     // Decode the instruction
@@ -18,7 +99,7 @@ module tinker_core (
         HALT        // Halt state
     } state_t;
 
-    // **Internal Signals**
+    // Internal Signals
     logic [63:0] PC, next_pc;           // Program counter and next PC value
     logic [31:0] IR;                    // Instruction register
     logic [63:0] A, B;                  // Source operand registers
@@ -29,12 +110,12 @@ module tinker_core (
     logic hlt_reg;                      // Halt signal register
     assign hlt = hlt_reg;               // Output halt signal
 
-    // **Instruction Fields**
+    // Instruction Fields
     logic [4:0] opcode, dest, src1, src2; // Opcode and register fields
     logic [11:0] L_field;                 // Immediate field
     logic [63:0] imm;                     // Extended immediate value
 
-    // **Control Signals**
+    // Control Signals
     logic [4:0] read_reg1, read_reg2, write_reg; // Register file addresses
     logic reg_write;                             // Register write enable
     logic [63:0] reg_data1, reg_data2, r31;     // Register file data
@@ -42,44 +123,12 @@ module tinker_core (
     logic mem_read, mem_write;                   // Memory read/write enables
     logic [63:0] mem_addr, mem_data_in, mem_data_out; // Memory interface signals
 
-    // **Instruction Type Flags**
+    // Instruction Type Flags
     logic is_alu_reg, is_alu_imm, is_load, is_store, is_branch, is_call, is_return, is_halt;
     logic B_src;                        // Source for B (0: register, 1: immediate)
 
-    // **Register File Module**
-    module register_file (
-        input logic clk,
-        input logic reset,
-        input logic [4:0] read_addr1,   // First read address
-        input logic [4:0] read_addr2,   // Second read address
-        input logic [4:0] write_addr,   // Write address
-        input logic write_en,           // Write enable
-        input logic [63:0] write_data,  // Data to write
-        output logic [63:0] read_data1, // First read data
-        output logic [63:0] read_data2, // Second read data
-        output logic [63:0] r31         // Value of register 31 (stack pointer)
-    );
-        logic [63:0] registers [0:31];  // 32 registers, 64 bits each
-
-        // **Register File Outputs**
-        assign read_data1 = registers[read_addr1];
-        assign read_data2 = registers[read_addr2];
-        assign r31 = registers[31];
-
-        // **Register File Logic**
-        always_ff @(posedge clk or posedge reset) begin
-            if (reset) begin
-                // Initialize registers on reset
-                for (int i = 0; i < 31; i++) registers[i] <= 64'h0;
-                registers[31] <= MEMSIZE; // r31 = MEMSIZE
-            end else if (write_en) begin
-                registers[write_addr] <= write_data; // Write to register (including r0)
-            end
-        end
-    endmodule
-
-    // **Instantiate Register File**
-    register_file reg_file (
+    // Instantiate Register File with Parameter
+    register_file #(.R31_INIT(MEMSIZE)) reg_file (
         .clk(clk),
         .reset(reset),
         .read_addr1(read_reg1),
@@ -92,54 +141,8 @@ module tinker_core (
         .r31(r31)
     );
 
-    // **Memory Unit Module**
-    module memory_unit (
-        input logic clk,
-        input logic reset,
-        input logic [63:0] addr,    // Memory address
-        input logic [1:0] size,     // Access size (2: 32-bit, 3: 64-bit)
-        input logic read_en,        // Read enable
-        input logic write_en,       // Write enable
-        input logic [63:0] data_in, // Data to write
-        output logic [63:0] data_out // Data read
-    );
-        logic [7:0] bytes [0:MEMSIZE-1]; // Byte-addressable memory
-
-        // **Memory Write Logic**
-        always_ff @(posedge clk or posedge reset) begin
-            if (reset) begin
-                // Memory could be initialized here if needed (left empty for simplicity)
-            end else if (write_en) begin
-                case (size)
-                    3: begin // 64-bit write
-                        bytes[addr]   <= data_in[7:0];
-                        bytes[addr+1] <= data_in[15:8];
-                        bytes[addr+2] <= data_in[23:16];
-                        bytes[addr+3] <= data_in[31:24];
-                        bytes[addr+4] <= data_in[39:32];
-                        bytes[addr+5] <= data_in[47:40];
-                        bytes[addr+6] <= data_in[55:48];
-                        bytes[addr+7] <= data_in[63:56];
-                    end
-                endcase
-            end
-        end
-
-        // **Memory Read Logic**
-        always_comb begin
-            data_out = 64'h0;
-            if (read_en) begin
-                case (size)
-                    2: data_out = {32'h0, bytes[addr+3], bytes[addr+2], bytes[addr+1], bytes[addr]}; // 32-bit read
-                    3: data_out = {bytes[addr+7], bytes[addr+6], bytes[addr+5], bytes[addr+4],
-                                   bytes[addr+3], bytes[addr+2], bytes[addr+1], bytes[addr]}; // 64-bit read
-                endcase
-            end
-        end
-    endmodule
-
-    // **Instantiate Memory Unit**
-    memory_unit mem (
+    // Instantiate Memory Unit with Parameter
+    memory_unit #(.MEMSIZE(MEMSIZE)) mem (
         .clk(clk),
         .reset(reset),
         .addr(mem_addr),
@@ -150,8 +153,8 @@ module tinker_core (
         .data_out(mem_data_out)
     );
 
-    // **Sequential Logic (State and PC Updates)**
-    always_ff @(posedge clk or posedge reset) begin
+    // Sequential Logic (State and PC Updates)
+    always @(posedge clk or posedge reset) begin
         if (reset) begin
             state <= FETCH;         // Start in FETCH state
             PC <= 64'h2000;         // Initial PC value
@@ -175,9 +178,9 @@ module tinker_core (
         end
     end
 
-    // **ALU Output (Combinational Logic)**
+    // ALU Output (Combinational Logic)
     logic [63:0] ALUOut_next;
-    always_comb begin
+    always @(*) begin
         ALUOut_next = ALUOut; // Default to current value
         if (state == EXECUTE) begin
             case (opcode)
@@ -205,9 +208,9 @@ module tinker_core (
         end
     end
 
-    // **State Machine (Combinational Logic)**
-    always_comb begin
-        // **Default Assignments**
+    // State Machine (Combinational Logic)
+    always @(*) begin
+        // Default Assignments
         next_state = state;
         pc_write = 0;
         mem_read = 0;
@@ -223,14 +226,14 @@ module tinker_core (
         B_src = 0;
         imm = 64'h0;
 
-        // **Instruction Decoding**
+        // Instruction Decoding
         opcode = IR[31:27]; // 5-bit opcode
         dest = IR[26:22];   // Destination register
         src1 = IR[21:17];   // First source register
         src2 = IR[16:12];   // Second source register
         L_field = IR[11:0]; // Immediate field
 
-        // **Instruction Type Detection**
+        // Instruction Type Detection
         is_alu_reg = (opcode == 5'h18 || opcode == 5'h1a || opcode == 5'h1c || opcode == 5'h1d ||
                       opcode == 5'h00 || opcode == 5'h01 || opcode == 5'h02 || opcode == 5'h03 ||
                       opcode == 5'h04 || opcode == 5'h06);
@@ -243,7 +246,7 @@ module tinker_core (
         is_return = (opcode == 5'h0d);
         is_halt = (opcode == 5'h0f && L_field == 12'h0); // Halt instruction
 
-        // **State Transitions**
+        // State Transitions
         case (state)
             FETCH: begin
                 mem_addr = PC;
@@ -256,7 +259,7 @@ module tinker_core (
                 imm = {52'h0, L_field}; // Zero-extend by default
                 if (opcode == 5'h0a) imm = {{52{L_field[11]}}, L_field}; // Sign-extend for brr L
 
-                // **Set Register Read Addresses**
+                // Set Register Read Addresses
                 if (is_alu_reg) begin
                     read_reg1 = src1;
                     read_reg2 = src2;
