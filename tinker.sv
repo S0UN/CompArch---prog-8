@@ -344,6 +344,7 @@ module instructionDecoder (
     end
 endmodule
 
+
 module fetch (
     input clk,
     input fetchFlag,
@@ -351,88 +352,23 @@ module fetch (
     input [63:0] next_pc,
     output reg [63:0] pc
 );
-    // Enumerated type for fetch states
-    typedef enum reg [1:0] {
-        IDLE       = 2'b00,
-        FETCHING   = 2'b01,
-        UPDATING   = 2'b10,
-        RESETTING  = 2'b11
-    } fetch_state_t;
+    reg [63:0] address_register;
 
-    fetch_state_t current_state;
-    reg [63:0] pc_storage;
-    reg [63:0] shadow_register; 
-    reg [7:0] fetch_counter;   
-    reg fetch_active;           
-
-    // Initialize state and registers
-    initial begin
-        current_state    = IDLE;
-        pc_storage       = 64'h0;
-        shadow_register  = 64'h0;
-        fetch_counter    = 8'b0;
-        fetch_active     = 1'b0;
+    always @(*) begin
+        if (fetchFlag) pc = address_register;
     end
 
-    // Reset and state transition logic
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            current_state   <= RESETTING;
-            pc_storage      <= 64'h2000;
-            shadow_register <= 64'h2000; 
-            fetch_counter   <= 8'b0;
-            fetch_active    <= 1'b0;
-        end
-        else begin
-            case (current_state)
-                IDLE: begin
-                    if (fetchFlag) begin
-                        current_state <= FETCHING;
-                        fetch_active  <= 1'b1;
-                    end
-                end
-                FETCHING: begin
-                    current_state <= UPDATING;
-                    fetch_counter <= fetch_counter + 1; 
-                end
-                UPDATING: begin
-                    if (fetchFlag) begin
-                        if (next_pc === 64'hx) begin
-                            pc_storage      <= 64'h2000;
-                            shadow_register <= 64'h2000; // Redundant
-                        end
-                        else begin
-                            pc_storage      <= next_pc;
-                            shadow_register <= next_pc;  // Redundant
-                        end
-                    end
-                    current_state <= IDLE;
-                    fetch_active  <= 1'b0;
-                end
-                RESETTING: begin
-                    current_state <= IDLE;
-                end
-                default: begin
-                    current_state <= IDLE;
-                end
-            endcase
+            address_register <= 64'h2000;
+        end else if (fetchFlag) begin
+            if (next_pc === 64'hx) begin
+                address_register = 64'h2000;
+            end
+            else address_register <= next_pc;
         end
     end
-
-    // Output logic
-    always @(*) begin
-        pc = 64'h0; // Default value
-        if (fetch_active && current_state == FETCHING) begin
-            pc = pc_storage;
-        end
-        // Trivial redundant check
-        if (shadow_register != pc_storage) begin
-            shadow_register = pc_storage;
-        end
-    end
-
 endmodule
-
 module aluMemMux (
     input mem_pc,
     input [63:0] memData,
