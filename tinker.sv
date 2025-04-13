@@ -384,6 +384,8 @@ module aluMemMux (
         end
     end
 endmodule
+
+
 module alu (
     input aluEnable,
     input [4:0] control,
@@ -396,114 +398,147 @@ module alu (
     output reg [63:0] result,
     output reg [63:0] writeData,
     output reg [63:0] rwAddress,
-    output reg aluDone,
-    output reg writeFlag,
-    output reg memRead,
+    output reg aluDone, writeFlag, memRead,
     output reg [63:0] pc,
     output reg hlt,
     output reg mem_pc
 );
-    real float_operand1, float_operand2, float_output;
+    // Instruction opcodes from Tinker Instruction Manual
+    localparam AND     = 5'h00;  // and rd, rs, rt
+    localparam OR      = 5'h01;  // or rd, rs, rt
+    localparam XOR     = 5'h02;  // xor rd, rs, rt
+    localparam NOT     = 5'h03;  // not rd, rs
+    localparam SHFTR   = 5'h04;  // shftr rd, rs, rt
+    localparam SHFTRI  = 5'h05;  // shftri rd, L
+    localparam SHFTL   = 5'h06;  // shftl rd, rs, rt
+    localparam SHFTLI  = 5'h07;  // shftli rd, L
+    localparam BR      = 5'h08;  // br rd
+    localparam BRR     = 5'h09;  // brr rd
+    localparam BRRI    = 5'h0A;  // brr L
+    localparam BRNZ    = 5'h0B;  // brnz rd, rs
+    localparam CALL    = 5'h0C;  // call rd, rs, rt
+    localparam RETURN  = 5'h0D;  // return
+    localparam BRGT    = 5'h0E;  // brgt rd, rs, rt
+    localparam PRIV    = 5'h0F;  // priv (halt instruction)
+    localparam MOV_MEM = 5'h10;  // mov rd, (rs)(L)
+    localparam MOV_REG = 5'h11;  // mov rd, rs
+    localparam MOV_LIT = 5'h12;  // mov rd, L
+    localparam MOV_STR = 5'h13;  // mov (rd)(L), rs
+    localparam ADDF    = 5'h14;  // addf rd, rs, rt
+    localparam SUBF    = 5'h15;  // subf rd, rs, rt
+    localparam MULF    = 5'h16;  // mulf rd, rs, rt
+    localparam DIVF    = 5'h17;  // divf rd, rs, rt
+    localparam ADD     = 5'h18;  // add rd, rs, rt
+    localparam ADDI    = 5'h19;  // addi rd, L
+    localparam SUB     = 5'h1A;  // sub rd, rs, rt
+    localparam SUBI    = 5'h1B;  // subi rd, L
+    localparam MUL     = 5'h1C;  // mul rd, rs, rt
+    localparam DIV     = 5'h1D;  // div rd, rs, rt
+
+    // Memory base address
+    localparam MEM_BASE_ADDR = 64'h2000;
+
+    // Floating point operations
+    real float_operand1, float_operand2, float_result;
     assign float_operand1 = $bitstoreal(input1);
     assign float_operand2 = $bitstoreal(input2);
 
     always @(*) begin
-        // Initialize outputs
-        result    = 64'b0;
-        writeData = 64'b0;
-        rwAddress = 64'h2000;
-        writeFlag = 1'b0;
-        memRead   = 1'b0;
-        mem_pc    = 1'b0;
-        pc        = inputPc + 4;
-        hlt       = 1'b0;
-        aluDone   = 1'b0;
-
         if (aluEnable) begin
+            // Initialize all outputs to default values
+            result = 64'b0;
+            pc = inputPc + 4;  // Default: increment PC by 4
+            writeData = 64'b0;
+            rwAddress = MEM_BASE_ADDR;
+            writeFlag = 1'b0;
+            memRead = 1'b0;
+            mem_pc = 1'b0;
+            hlt = 1'b0;
+            aluDone = 1'b1;
+            
+            // Execute operation based on control signal
             case (control)
-                // Integer arithmetic
-                5'h18: result = input1 + input2;
-                5'h19: result = input1 + input2;
-                5'h1A: result = input1 - input2;
-                5'h1B: result = input1 - input2;
-                5'h1C: result = input1 * input2;
-                5'h1D: result = input1 / input2;
-                // Bitwise operations
-                5'h00: result = input1 & input2;
-                5'h01: result = input1 | input2;
-                5'h02: result = input1 ^ input2;
-                5'h03: result = ~input1;
-                // Shift operations
-                5'h04: result = input1 >> input2;
-                5'h05: result = input1 >> input2;
-                5'h06: result = input1 << input2;
-                5'h07: result = input1 << input2;
-                // Memory operations
-                5'h10: begin
+                // Integer Arithmetic Instructions
+                ADD, ADDI: result = input1 + input2;
+                SUB, SUBI: result = input1 - input2;
+                MUL: result = input1 * input2;
+                DIV: result = input1 / input2;
+                
+                // Logic Instructions
+                AND: result = input1 & input2;
+                OR:  result = input1 | input2;
+                XOR: result = input1 ^ input2;
+                NOT: result = ~input1;
+                
+                // Shift Instructions
+                SHFTR, SHFTRI: result = input1 >> input2;
+                SHFTL, SHFTLI: result = input1 << input2;
+                
+                // Data Movement Instructions
+                MOV_MEM: begin
                     rwAddress = input1 + input2;
                     memRead = 1'b1;
                 end
-                5'h13: begin
+                MOV_REG: result = input1;
+                MOV_LIT: result = {input1[63:12], input2[11:0]};
+                MOV_STR: begin
                     rwAddress = rd + input2;
                     writeData = input1;
                     writeFlag = 1'b1;
                 end
-                // Immediate and move
-                5'h11: result = input1;
-                5'h12: result = {input1[63:12], input2[11:0]};
-                // Floating-point operations
-                5'h14: begin
-                    float_output = float_operand1 + float_operand2;
-                    result = $realtobits(float_output);
+                
+                // Floating Point Instructions
+                ADDF: begin
+                    float_result = float_operand1 + float_operand2;
+                    result = $realtobits(float_result);
                 end
-                5'h15: begin
-                    float_output = float_operand1 - float_operand2;
-                    result = $realtobits(float_output);
+                SUBF: begin
+                    float_result = float_operand1 - float_operand2;
+                    result = $realtobits(float_result);
                 end
-                5'h16: begin
-                    float_output = float_operand1 * float_operand2;
-                    result = $realtobits(float_output);
+                MULF: begin
+                    float_result = float_operand1 * float_operand2;
+                    result = $realtobits(float_result);
                 end
-                5'h17: begin
-                    float_output = float_operand1 / float_operand2;
-                    result = $realtobits(float_output);
+                DIVF: begin
+                    float_result = float_operand1 / float_operand2;
+                    result = $realtobits(float_result);
                 end
-                // Branch operations
-                5'h08: pc = rd;
-                5'h09: pc = inputPc + rd;
-                5'h0A: pc = inputPc + $signed(input2);
-                5'h0B: begin
-                    if (input1 != 64'b0) begin
-                        pc = rd;
-                    end
-                    else begin
-                        pc = inputPc + 4;
-                    end
-                end
-                5'h0E: begin
-                    if (input1 > input2) begin
-                        pc = rd;
-                    end
-                    else begin
-                        pc = inputPc + 4;
-                    end
-                end
-                // Call/return operations
-                5'h0C: begin
+                
+                // Control Instructions
+                BR: pc = rd;
+                BRR: pc = inputPc + rd;
+                BRRI: pc = inputPc + $signed(input2);
+                BRNZ: pc = (input1 != 0) ? rd : inputPc + 4;
+                BRGT: pc = (input1 > input2) ? rd : inputPc + 4;
+                
+                // Subroutine Instructions
+                CALL: begin
                     pc = rd;
-                    writeData = inputPc + 4;
+                    writeData = inputPc + 4;  // Save return address
                     rwAddress = r31 - 8;
                     writeFlag = 1'b1;
                 end
-                5'h0D: begin
+                RETURN: begin
                     rwAddress = r31 - 8;
                     memRead = 1'b1;
                     mem_pc = 1'b1;
                 end
-                // Halt
-                5'h0F: hlt = 1'b1;
+                
+                // Privileged Instructions
+                PRIV: hlt = 1'b1;  // Assuming PRIV is used as HALT here
+                
+                default: begin
+                    // Default case (should not happen but added for safety)
+                    result = 64'b0;
+                end
             endcase
-            aluDone = 1'b1;
+        end
+        else begin
+            // ALU not enabled
+            hlt = 1'b0;
+            aluDone = 1'b0;
+            // Other outputs are undefined when ALU is not enabled
         end
     end
 endmodule
