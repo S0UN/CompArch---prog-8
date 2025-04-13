@@ -94,7 +94,7 @@
      );
 
      // Memory Unit (Handles instructions and data)
-     memory_unit memory_unit_inst (
+     memory_unit memory (
          .clk(clk),
          .reset(reset),
          .readEnable(memReadEnable), // Controlled by FSM
@@ -117,7 +117,7 @@
      );
 
      // Register File
-     reg_file_bank register_file_inst (
+     reg_file_bank reg_file (
          .clk(clk),
          .reset(reset),
          .readEnable(regReadEnable),   // Controlled by FSM
