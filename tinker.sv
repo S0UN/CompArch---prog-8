@@ -278,67 +278,120 @@ module instructionDecoder (
     output reg regReadFlag,
     output reg regWriteFlag
 );
-    reg [2:0] decoder_state;
-    reg [4:0] cached_opcode;
+    // Enumerated type for pipeline stages
+    typedef enum reg [2:0] {
+        FETCH     = 3'b000,
+        DECODE    = 3'b001,
+        EXECUTE   = 3'b010,
+        STORE     = 3'b011,
+        WRITEBACK = 3'b100
+    } pipeline_stage_t;
 
+    pipeline_stage_t current_stage;
+    reg [4:0] stored_opcode;
+
+    // Reset logic
     always @(posedge rst) begin
-        if (rst) decoder_state <= 3'b0;
+        if (rst) begin
+            current_stage <= FETCH;
+        end
     end
 
+    // State transition logic
     always @(posedge clk) begin
-        aluEnable <= 0;
-        regWriteFlag <= 0;
-        regReadFlag <= 0;
-        memFlag <= 0;
+        // Default flag resets
+        aluEnable    <= 1'b0;
+        regWriteFlag <= 1'b0;
+        regReadFlag  <= 1'b0;
+        memFlag      <= 1'b0;
 
-        case (decoder_state)
-            3'b0: decoder_state <= 3'b1;
-            3'b1: decoder_state <= 3'b10;
-            3'b10: begin
-                if (!aluDone) decoder_state <= 3'b10;
-                else if (cached_opcode == 5'h10 || cached_opcode == 5'h13 || cached_opcode == 5'h0C || cached_opcode == 5'h0D) begin
-                    decoder_state <= 3'b11;
-                end
-                else if (cached_opcode == 5'h08 || cached_opcode == 5'h09 || cached_opcode == 5'h0A || cached_opcode == 5'h0B || cached_opcode == 5'h0E) begin
-                    decoder_state <= 3'b0;
-                end
-                else decoder_state <= 3'b100;
+        case (current_stage)
+            FETCH: begin
+                current_stage <= DECODE;
             end
-            3'b11: begin
-                if (cached_opcode == 5'h10) decoder_state <= 3'b100;
-                else decoder_state <= 3'b0;
+            DECODE: begin
+                current_stage <= EXECUTE;
             end
-            3'b100: decoder_state <= 3'b0;
+            EXECUTE: begin
+                if (!aluDone) begin
+                    current_stage <= EXECUTE; // Stay in EXECUTE
+                end
+                else if (stored_opcode == 5'h10 || stored_opcode == 5'h13 ||
+                         stored_opcode == 5'h0C || stored_opcode == 5'h0D) begin
+                    current_stage <= STORE;
+                end
+                else if (stored_opcode == 5'h08 || stored_opcode == 5'h09 ||
+                         stored_opcode == 5'h0A || stored_opcode == 5'h0B ||
+                         stored_opcode == 5'h0E) begin
+                    current_stage <= FETCH;
+                end
+                else begin
+                    current_stage <= WRITEBACK;
+                end
+            end
+            STORE: begin
+                if (stored_opcode == 5'h10) begin
+                    current_stage <= WRITEBACK;
+                end
+                else begin
+                    current_stage <= FETCH;
+                end
+            end
+            WRITEBACK: begin
+                current_stage <= FETCH;
+            end
+            default: begin
+                current_stage <= FETCH; // Fallback for safety
+            end
         endcase
     end
 
+    // Output control logic
     always @(*) begin
-        case (decoder_state)
-            3'b0: begin
-                fetchFlag = 1;
-                memFlag = 1;
+        // Default values
+        fetchFlag = 1'b0;
+        memFlag = 1'b0;
+        opcode   = 5'b0;
+        rd  = 5'b0;
+        rs = 5'b0;
+        rt = 5'b0;
+        literal  = 64'b0;
+        aluEnable= 1'b0;
+        regReadFlag  = 1'b0;
+        regWriteFlag = 1'b0;
+
+        case (current_stage)
+            FETCH: begin
+                fetchFlag = 1'b1;
+                memFlag   = 1'b1;
             end
-            3'b1: begin
+            DECODE: begin
+                // Instruction decoding
                 opcode = instructionLine[31:27];
-                cached_opcode = opcode;
+                stored_opcode = opcode;
                 rd = instructionLine[26:22];
                 rs = instructionLine[21:17];
-                rt = instructionLine[16:12];
-                literal = {52'b0, instructionLine[11:0]};
+                rt  = instructionLine[16:12];
+                literal ={{52{1'b0}}, instructionLine[11:0]};
 
-                case (opcode)
-                    5'b11001: rs = rd;
-                    5'b11011: rs = rd;
-                    5'b00101: rs = rd;
-                    5'b00111: rs = rd;
-                    5'b10010: rs = rd;
-                endcase
+                // Adjust rs for specific opcodes
+                if (opcode == 5'b11001 || opcode == 5'b11011 ||
+                    opcode == 5'b00101 || opcode == 5'b00111 ||
+                    opcode == 5'b10010) begin
+                    rs = rd;
+                end
 
-                regReadFlag = 1;
+                regReadFlag = 1'b1;
             end
-            3'b10: aluEnable = 1;
-            3'b11: memFlag = 1;
-            3'b100: regWriteFlag = 1;
+            EXECUTE: begin
+                aluEnable = 1'b1;
+            end
+            STORE: begin
+                memFlag = 1'b1;
+            end
+            WRITEBACK: begin
+                regWriteFlag = 1'b1;
+            end
         endcase
     end
 endmodule
