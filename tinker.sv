@@ -385,154 +385,124 @@ module aluMemMux (
     end
 endmodule
 
+
 module alu (
-    input               aluEnable,
-    input       [4:0]   control,
-    input       [63:0]  input1,
-    input       [63:0]  input2,
-    input       [63:0]  rd,
-    input       [63:0]  inputPc,
-    input       [63:0]  r31,
-    input               clk,
-    output reg  [63:0]  result,
-    output reg  [63:0]  writeData,
-    output reg  [63:0]  rwAddress,
-    output reg          aluDone, writeFlag, memRead,
-    output reg  [63:0]  pc,
-    output reg          hlt,
-    output reg          mem_pc
+    input aluEnable,
+    input [4:0] control,
+    input [63:0] input1,
+    input [63:0] input2,
+    input [63:0] rd,
+    input [63:0] inputPc,
+    input [63:0] r31,
+    input clk,
+    output reg [63:0] result,
+    output reg [63:0] writeData,
+    output reg [63:0] rwAddress,
+    output reg aluDone, writeFlag, memRead,
+    output reg [63:0] pc,
+    output reg hlt,
+    output reg mem_pc
 );
-
-    localparam OP_AND    = 5'h00;
-    localparam OP_OR     = 5'h01;
-    localparam OP_XOR    = 5'h02;
-    localparam OP_NOT    = 5'h03;
-    localparam OP_SHR    = 5'h04;
-    localparam OP_SRA    = 5'h05;
-    localparam OP_SHL    = 5'h06;
-    localparam OP_SLA    = 5'h07;
-    localparam OP_JMP    = 5'h08;
-    localparam OP_JAL    = 5'h09;
-    localparam OP_BR     = 5'h0A;
-    localparam OP_BNZ    = 5'h0B;
-    localparam OP_CALL   = 5'h0C;
-    localparam OP_RET    = 5'h0D;
-    localparam OP_BGT    = 5'h0E;
-    localparam OP_HALT   = 5'h0F;
-    localparam OP_LD     = 5'h10;
-    localparam OP_MVHI   = 5'h11;
-    localparam OP_MERGE  = 5'h12;
-    localparam OP_ST     = 5'h13;
-    localparam OP_FADD   = 5'h14;
-    localparam OP_FSUB   = 5'h15;
-    localparam OP_FMUL   = 5'h16;
-    localparam OP_FDIV   = 5'h17;
-    localparam OP_ADD    = 5'h18;
-    localparam OP_ADDI   = 5'h19;
-    localparam OP_SUB    = 5'h1A;
-    localparam OP_SUBI   = 5'h1B;
-    localparam OP_MUL    = 5'h1C;
-    localparam OP_DIV    = 5'h1D;
-
     real float_operand1, float_operand2, float_output;
     assign float_operand1 = $bitstoreal(input1);
     assign float_operand2 = $bitstoreal(input2);
 
     always @(*) begin
-        result      = 64'b0;
-        writeData   = 64'b0;
-        rwAddress   = 64'h2000;
-        pc          = inputPc + 4;
-        aluDone     = 1'b0;
-        writeFlag   = 1'b0;
-        memRead     = 1'b0;
-        hlt         = 1'b0;
-        mem_pc      = 1'b0;
-
         if (aluEnable) begin
-            aluDone = 1'b1;
-
+            hlt = 0;
+            pc = inputPc + 4;
+            writeData = 0;
+            rwAddress = 64'h2000;
+            writeFlag = 0;
+            memRead = 0;
+            mem_pc = 0;
             case (control)
-                OP_ADD:    result = input1 + input2;
-                OP_ADDI:   result = input1 + input2;
-                OP_SUB:    result = input1 - input2;
-                OP_SUBI:   result = input1 - input2;
-                OP_MUL:    result = input1 * input2;
-                OP_DIV:    result = input1 / input2;
-                OP_AND:    result = input1 & input2;
-                OP_OR:     result = input1 | input2;
-                OP_XOR:    result = input1 ^ input2;
-                OP_NOT:    result = ~input1;
-                OP_SHR:    result = input1 >> input2;
-                OP_SRA:    result = input1 >> input2; // Original used logical shift here
-                OP_SHL:    result = input1 << input2;
-                OP_SLA:    result = input1 << input2; // Arithmetic Left Shift is same as Logical
-
-                OP_LD: begin
+                5'h18: result = input1 + input2;
+                5'h19: result = input1 + input2;
+                5'h1A: result = input1 - input2;
+                5'h1B: result = input1 - input2;
+                5'h1C: result = input1 * input2;
+                5'h1D: result = input1 / input2;
+                5'h00: result = input1 & input2;
+                5'h01: result = input1 | input2;
+                5'h02: result = input1 ^ input2;
+                5'h03: result = ~input1;
+                5'h04: result = input1 >> input2;
+                5'h05: result = input1 >> input2;
+                5'h06: result = input1 << input2;
+                5'h07: result = input1 << input2;
+                5'h10: begin
+                    result = 64'b0;
                     rwAddress = input1 + input2;
-                    memRead = 1'b1;
+                    memRead = 1;
                 end
-
-                OP_MVHI:   result = input1;
-                OP_MERGE:  result = {input1[63:12], input2[11:0]};
-
-                OP_ST: begin
+                5'h11: result = input1;
+                5'h12: result = {input1[63:12], input2[11:0]};
+                5'h13: begin
+                    result = 64'b0;
                     rwAddress = rd + input2;
                     writeData = input1;
-                    writeFlag = 1'b1;
+                    writeFlag = 1;
                 end
-
-                OP_FADD: begin
+                5'h14: begin
                     float_output = float_operand1 + float_operand2;
                     result = $realtobits(float_output);
                 end
-                OP_FSUB: begin
+                5'h15: begin
                     float_output = float_operand1 - float_operand2;
                     result = $realtobits(float_output);
                 end
-                OP_FMUL: begin
+                5'h16: begin
                     float_output = float_operand1 * float_operand2;
                     result = $realtobits(float_output);
                 end
-                OP_FDIV: begin
+                5'h17: begin
                     float_output = float_operand1 / float_operand2;
                     result = $realtobits(float_output);
                 end
-
-                OP_JMP: begin
+                5'h08: begin
                     pc = rd;
+                    result = 64'b0;
                 end
-                OP_JAL: begin
+                5'h09: begin
                     pc = inputPc + rd;
+                    result = 64'b0;
                 end
-                OP_BR: begin
+                5'h0A: begin
                     pc = inputPc + $signed(input2);
+                    result = 64'b0;
                 end
-                OP_BNZ: begin
-                    pc = (input1 != 64'b0) ? rd : inputPc + 4;
+                5'h0B: begin
+                    pc = (input1 != 0) ? rd : inputPc + 4;
+                    result = 64'b0;
                 end
-                OP_CALL: begin
+                5'h0C: begin
                     pc = rd;
+                    result = 64'b0;
                     writeData = inputPc + 4;
                     rwAddress = r31 - 8;
-                    writeFlag = 1'b1;
+                    writeFlag = 1;
                 end
-                OP_RET: begin
+                5'h0D: begin
+                    result = 64'b0;
                     rwAddress = r31 - 8;
-                    memRead = 1'b1;
-                    mem_pc = 1'b1;
+                    memRead = 1;
+                    mem_pc = 1;
                 end
-                OP_BGT: begin
+                5'h0E: begin
                     pc = (input1 > input2) ? rd : inputPc + 4;
+                    result = 64'b0;
                 end
-                OP_HALT: begin
-                    hlt = 1'b1;
-                end
-                default: begin
-                    // Keep default assignments
+                5'h0F: begin
+                    result = 64'b0;
+                    hlt = 1;
                 end
             endcase
+            aluDone = 1;
+        end
+        else begin
+            hlt = 0;
+            aluDone = 0;
         end
     end
-
 endmodule
