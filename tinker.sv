@@ -297,7 +297,7 @@ module instructionDecoder (
                 dest_reg = instruction_data[26:22];
                 src_reg1 = instruction_data[21:17];
                 src_reg2 = instruction_data[16:12];
-                literal_value = {52'b0 INSTR_data[11:0]};
+                literal_value = {52'b0 instruction_data[11:0]};
 
                 case (operation_code)
                     5'b11001: src_reg1 = dest_reg;
