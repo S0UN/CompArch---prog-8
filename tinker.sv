@@ -362,44 +362,44 @@
      output logic [63:0] dataOut         // Data read from memory
  );
      localparam MEM_SIZE = 524288; // 0x80000 bytes
-     logic [7:0] memory_array [0:MEM_SIZE-1];
+     logic [7:0] bytes [0:MEM_SIZE-1]; // RENAMED from bytes
      integer idx;
 
      // Instruction Fetch (Combinational Read based on instructionAddr)
      // Assuming little-endian fetch
-     assign instructionOut[7:0]   = memory_array[instructionAddr];
-     assign instructionOut[15:8]  = memory_array[instructionAddr + 1];
-     assign instructionOut[23:16] = memory_array[instructionAddr + 2];
-     assign instructionOut[31:24] = memory_array[instructionAddr + 3];
+     assign instructionOut[7:0]   = bytes[instructionAddr];
+     assign instructionOut[15:8]  = bytes[instructionAddr + 1];
+     assign instructionOut[23:16] = bytes[instructionAddr + 2];
+     assign instructionOut[31:24] = bytes[instructionAddr + 3];
 
      // Data Read (Combinational Read based on dataAddr, enabled by readEnable)
      // Assuming little-endian read
-     assign dataOut[7:0]   = readEnable ? memory_array[dataAddr]     : 8'hXX;
-     assign dataOut[15:8]  = readEnable ? memory_array[dataAddr + 1] : 8'hXX;
-     assign dataOut[23:16] = readEnable ? memory_array[dataAddr + 2] : 8'hXX;
-     assign dataOut[31:24] = readEnable ? memory_array[dataAddr + 3] : 8'hXX;
-     assign dataOut[39:32] = readEnable ? memory_array[dataAddr + 4] : 8'hXX;
-     assign dataOut[47:40] = readEnable ? memory_array[dataAddr + 5] : 8'hXX;
-     assign dataOut[55:48] = readEnable ? memory_array[dataAddr + 6] : 8'hXX;
-     assign dataOut[63:56] = readEnable ? memory_array[dataAddr + 7] : 8'hXX;
+     assign dataOut[7:0]   = readEnable ? bytes[dataAddr]     : 8'hXX;
+     assign dataOut[15:8]  = readEnable ? bytes[dataAddr + 1] : 8'hXX;
+     assign dataOut[23:16] = readEnable ? bytes[dataAddr + 2] : 8'hXX;
+     assign dataOut[31:24] = readEnable ? bytes[dataAddr + 3] : 8'hXX;
+     assign dataOut[39:32] = readEnable ? bytes[dataAddr + 4] : 8'hXX;
+     assign dataOut[47:40] = readEnable ? bytes[dataAddr + 5] : 8'hXX;
+     assign dataOut[55:48] = readEnable ? bytes[dataAddr + 6] : 8'hXX;
+     assign dataOut[63:56] = readEnable ? bytes[dataAddr + 7] : 8'hXX;
 
 
      // Memory Initialization and Write Logic (Synchronous)
      always @(posedge clk or posedge reset) begin
          if (reset) begin
              for (idx = 0; idx < MEM_SIZE; idx = idx + 1) begin
-                 memory_array[idx] <= 8'h0;
+                 bytes[idx] <= 8'h0;
              end
          end else if (writeEnable) begin
              // Assuming little-endian write
-             memory_array[dataAddr]     <= dataIn[7:0];
-             memory_array[dataAddr + 1] <= dataIn[15:8];
-             memory_array[dataAddr + 2] <= dataIn[23:16];
-             memory_array[dataAddr + 3] <= dataIn[31:24];
-             memory_array[dataAddr + 4] <= dataIn[39:32];
-             memory_array[dataAddr + 5] <= dataIn[47:40];
-             memory_array[dataAddr + 6] <= dataIn[55:48];
-             memory_array[dataAddr + 7] <= dataIn[63:56];
+             bytes[dataAddr]     <= dataIn[7:0];
+             bytes[dataAddr + 1] <= dataIn[15:8];
+             bytes[dataAddr + 2] <= dataIn[23:16];
+             bytes[dataAddr + 3] <= dataIn[31:24];
+             bytes[dataAddr + 4] <= dataIn[39:32];
+             bytes[dataAddr + 5] <= dataIn[47:40];
+             bytes[dataAddr + 6] <= dataIn[55:48];
+             bytes[dataAddr + 7] <= dataIn[63:56];
          end
      end
 
