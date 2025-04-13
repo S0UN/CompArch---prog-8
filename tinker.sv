@@ -344,7 +344,6 @@ module instructionDecoder (
     end
 endmodule
 
-
 module fetch (
     input clk,
     input fetchFlag,
@@ -352,23 +351,37 @@ module fetch (
     input [63:0] next_pc,
     output reg [63:0] pc
 );
+    // Constants
+    localparam INITIAL_PC = 64'h2000;  // Initial program counter value
+    
+    // Internal registers
     reg [63:0] address_register;
 
+    // Combinational logic for PC output
     always @(*) begin
-        if (fetchFlag) pc = address_register;
+        if (fetchFlag) 
+            pc = address_register;
     end
 
+    // Sequential logic for address register update
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            address_register <= 64'h2000;
-        end else if (fetchFlag) begin
+            // Reset to initial PC value
+            address_register <= INITIAL_PC;
+        end 
+        else if (fetchFlag) begin
+            // Handle undefined next_pc by loading initial value
             if (next_pc === 64'hx) begin
-                address_register = 64'h2000;
+                address_register <= INITIAL_PC;
             end
-            else address_register <= next_pc;
+            else begin
+                // Update address register with next PC value
+                address_register <= next_pc;
+            end
         end
     end
 endmodule
+
 module aluMemMux (
     input mem_pc,
     input [63:0] memData,
