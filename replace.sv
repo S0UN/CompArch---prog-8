@@ -1,3 +1,4 @@
+
 // Top-Level Module
 module tinker_core (
     input logic clk,
@@ -204,34 +205,102 @@ endmodule
 module inst_decoder (
     input clk,
     input rst,
+    input aluedone;
     input logic [31:0] instruction,
     output logic [63:0] imm,
     output logic [4:0] dest,
     output logic [4:0] src1,
     output logic [4:0] src2,
-    output logic [4:0] opcode
-
+    output logic [4:0] opcode,
+    output mem_flag,
+    output reg_flag,
+    output control_flag,
+    output mem_manager_flag,
+    output alu_flag
 );
     typedef enum logic [2:0]{ 
         FETCH = 3'b000
-        FETCH = 3'b000
-        FETCH = 3'b000
+        DECODE = 3'b000
+        EXECUTE = 3'b000
+        LOAD_STORE = 3'b000
         FETCH = 3'b000
     } states;
+
+    states state;
+
+    
+
+
     always @(posedge clk or rst) begin
         if (rst) begin
+            state <= FETCH;
+        end else begin
+            mem_flag = 0;
+            reg_flag = 0;
+            control_flag = 0;
+            mem_manager_flag = 0;
+            alu_flag = 0;
 
+        case(state)
+            FETCH: begin
+                state <= DECODE;
+            end
+            DECODE: begin
+                state <= EXECUTE;
+                
+            end 
+            EXECUTE: begin
+                
+            
+            end
+            LOAD_STORE: begin
+            
+            end
+            FETCH: begin
+            
+            end
+
+            default: ;
+
+        endcase 
+  
         end
-        opcode = instruction[31:27];
+    end
+
+    always@ (*)begin
+        case(state)
+            FETCH: begin
+                fetc
+            end
+            DECODE: begin
+                state <= EXECUTE;
+                
+            end 
+            EXECUTE: begin
+                
+            
+            end
+            LOAD_STORE: begin
+            
+            end
+            FETCH: begin
+            
+            end
+
+            default: ;
+    endcase
+
+    end
+    opcode = instruction[31:27];
         dest = instruction[26:22];
         src1 = instruction[21:17];
         src2 = instruction[16:12];
         imm = {52'h0, instruction[11:0]};
+
         case (opcode)
             5'b11001, 5'b11011, 5'b00101, 5'b00111, 5'b10010: src1 = dest;
             default: ; 
         endcase
-    end
 endmodule
 
 // Memory Handler
@@ -310,6 +379,7 @@ endmodule
 
 // Memory Unit
 module memory_unit (
+    input mem_flag,
     input logic [63:0] program_counter,
     input logic clk,
     input logic reset,
@@ -335,7 +405,7 @@ module memory_unit (
     assign data_out[15:8]  = bytes[address+1];
     assign data_out[7:0]   = bytes[address];
 
-    always_ff @(posedge clk or posedge reset) begin
+    always @(*) begin
         if (reset) begin
             for (j = 0; j < 524288; j = j + 1)
                 bytes[j] <= 8'h0;
@@ -349,6 +419,7 @@ endmodule
 
 // Fetch Unit
 module fetch_unit (
+    input fetch_flag,
     input logic clk,
     input logic reset,
     input logic [63:0] stack,
@@ -358,10 +429,11 @@ module fetch_unit (
     logic [63:0] pc;
     assign pc_out = pc;
 
-    always_ff @(posedge clk or posedge reset) begin
-        if (reset)
+    always @(posedge clk or posedge reset) begin
+        if (reset)begin
             pc <= 64'h2000;
-        else
+        end else if(fetch_flag) begin
             pc <= pc_in;
+        end
     end
 endmodule
