@@ -384,8 +384,6 @@ module aluMemMux (
         end
     end
 endmodule
-
-
 module alu (
     input aluEnable,
     input [4:0] control,
@@ -398,7 +396,9 @@ module alu (
     output reg [63:0] result,
     output reg [63:0] writeData,
     output reg [63:0] rwAddress,
-    output reg aluDone, writeFlag, memRead,
+    output reg aluDone,
+    output reg writeFlag,
+    output reg memRead,
     output reg [63:0] pc,
     output reg hlt,
     output reg mem_pc
@@ -408,42 +408,50 @@ module alu (
     assign float_operand2 = $bitstoreal(input2);
 
     always @(*) begin
+        // Initialize outputs
+        result    = 64'b0;
+        writeData = 64'b0;
+        rwAddress = 64'h2000;
+        writeFlag = 1'b0;
+        memRead   = 1'b0;
+        mem_pc    = 1'b0;
+        pc        = inputPc + 4;
+        hlt       = 1'b0;
+        aluDone   = 1'b0;
+
         if (aluEnable) begin
-            hlt = 0;
-            pc = inputPc + 4;
-            writeData = 0;
-            rwAddress = 64'h2000;
-            writeFlag = 0;
-            memRead = 0;
-            mem_pc = 0;
             case (control)
+                // Integer arithmetic
                 5'h18: result = input1 + input2;
                 5'h19: result = input1 + input2;
                 5'h1A: result = input1 - input2;
                 5'h1B: result = input1 - input2;
                 5'h1C: result = input1 * input2;
                 5'h1D: result = input1 / input2;
+                // Bitwise operations
                 5'h00: result = input1 & input2;
                 5'h01: result = input1 | input2;
                 5'h02: result = input1 ^ input2;
                 5'h03: result = ~input1;
+                // Shift operations
                 5'h04: result = input1 >> input2;
                 5'h05: result = input1 >> input2;
                 5'h06: result = input1 << input2;
                 5'h07: result = input1 << input2;
+                // Memory operations
                 5'h10: begin
-                    result = 64'b0;
                     rwAddress = input1 + input2;
-                    memRead = 1;
+                    memRead = 1'b1;
                 end
-                5'h11: result = input1;
-                5'h12: result = {input1[63:12], input2[11:0]};
                 5'h13: begin
-                    result = 64'b0;
                     rwAddress = rd + input2;
                     writeData = input1;
-                    writeFlag = 1;
+                    writeFlag = 1'b1;
                 end
+                // Immediate and move
+                5'h11: result = input1;
+                5'h12: result = {input1[63:12], input2[11:0]};
+                // Floating-point operations
                 5'h14: begin
                     float_output = float_operand1 + float_operand2;
                     result = $realtobits(float_output);
@@ -460,49 +468,42 @@ module alu (
                     float_output = float_operand1 / float_operand2;
                     result = $realtobits(float_output);
                 end
-                5'h08: begin
-                    pc = rd;
-                    result = 64'b0;
-                end
-                5'h09: begin
-                    pc = inputPc + rd;
-                    result = 64'b0;
-                end
-                5'h0A: begin
-                    pc = inputPc + $signed(input2);
-                    result = 64'b0;
-                end
+                // Branch operations
+                5'h08: pc = rd;
+                5'h09: pc = inputPc + rd;
+                5'h0A: pc = inputPc + $signed(input2);
                 5'h0B: begin
-                    pc = (input1 != 0) ? rd : inputPc + 4;
-                    result = 64'b0;
-                end
-                5'h0C: begin
-                    pc = rd;
-                    result = 64'b0;
-                    writeData = inputPc + 4;
-                    rwAddress = r31 - 8;
-                    writeFlag = 1;
-                end
-                5'h0D: begin
-                    result = 64'b0;
-                    rwAddress = r31 - 8;
-                    memRead = 1;
-                    mem_pc = 1;
+                    if (input1 != 64'b0) begin
+                        pc = rd;
+                    end
+                    else begin
+                        pc = inputPc + 4;
+                    end
                 end
                 5'h0E: begin
-                    pc = (input1 > input2) ? rd : inputPc + 4;
-                    result = 64'b0;
+                    if (input1 > input2) begin
+                        pc = rd;
+                    end
+                    else begin
+                        pc = inputPc + 4;
+                    end
                 end
-                5'h0F: begin
-                    result = 64'b0;
-                    hlt = 1;
+                // Call/return operations
+                5'h0C: begin
+                    pc = rd;
+                    writeData = inputPc + 4;
+                    rwAddress = r31 - 8;
+                    writeFlag = 1'b1;
                 end
+                5'h0D: begin
+                    rwAddress = r31 - 8;
+                    memRead = 1'b1;
+                    mem_pc = 1'b1;
+                end
+                // Halt
+                5'h0F: hlt = 1'b1;
             endcase
-            aluDone = 1;
-        end
-        else begin
-            hlt = 0;
-            aluDone = 0;
+            aluDone = 1'b1;
         end
     end
 endmodule
