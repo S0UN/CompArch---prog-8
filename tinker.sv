@@ -61,7 +61,7 @@ module tinker_core (
         .rs(source_register_a),
         .rt(source_register_b),
         .opcode(instruction_type),
-        .aluEnable(computation_start),
+        .aluFlag(computation_start),
         .fetchFlag(fetch_start),
         .regReadFlag(register_read_start),
         .regWriteFlag(register_write_start)
@@ -93,7 +93,7 @@ module tinker_core (
 
     // ALU - handles computational operations
     alu calculation_unit(
-        .aluEnable(computation_start),
+        .aluFlag(computation_start),
         .control(instruction_type),
         .input1(source_a_value),
         .input2(secondary_input),
@@ -275,7 +275,7 @@ module instructionDecoder (
     output reg [4:0] rs,
     output reg [4:0] rt,
     output reg [4:0] opcode,
-    output reg aluEnable,
+    output reg aluFlag,
     output reg regReadFlag,
     output reg regWriteFlag
 );
@@ -309,7 +309,7 @@ module instructionDecoder (
     // State transition logic
     always @(posedge clk) begin
         // Default: disable all control signals at start of clock cycle
-        aluEnable <= 0;
+        aluFlag <= 0;
         regWriteFlag <= 0;
         regReadFlag <= 0;
         memFlag <= 0;
@@ -400,7 +400,7 @@ module instructionDecoder (
             
             EXECUTE: begin
                 // Execute stage: activate ALU
-                aluEnable = 1;
+                aluFlag = 1;
             end
             
             MEMORY: begin
@@ -416,7 +416,7 @@ module instructionDecoder (
             default: begin
                 fetchFlag = 0;
                 memFlag = 0;
-                aluEnable = 0;
+                aluFlag = 0;
                 regReadFlag = 0;
                 regWriteFlag = 0;
             end
@@ -480,7 +480,7 @@ endmodule
 
 
 module alu (
-    input aluEnable,
+    input aluFlag,
     input [4:0] control,
     input [63:0] input1,
     input [63:0] input2,
@@ -537,7 +537,7 @@ module alu (
     assign float_operand2 = $bitstoreal(input2);
 
     always @(*) begin
-        if (aluEnable) begin
+        if (aluFlag) begin
             // Initialize all outputs to default values
             result = 64'b0;
             pc = inputPc + 4;  // Default: increment PC by 4
