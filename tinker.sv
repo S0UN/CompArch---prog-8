@@ -4,109 +4,108 @@ module tinker_core (
     output hlt
 );
     
-    logic [4:0] dest_reg, src_reg1, src_reg2, operation;
-    logic [31:0] instr;
-    logic [63:0] next_program_counter, program_counter, alu_program_counter;
-    logic [63:0] immediate, dest_val, src1_val, src2_val, alu_in2, alu_result, stack_pointer, data_to_write, rw_addr, data_from_mem, register_write_data;
-    logic write_enable;
-    logic mem_program_counter;
-    logic alu_activate, reg_read_activate, reg_write_activate, fetch_activate, mem_read, mem_activate, alu_done;
+    logic [4:0] target_register, source_register_a, source_register_b, instruction_type;
+    logic [31:0] instruction_word;
+    logic [63:0] subsequent_address, current_address, alu_calculated_address;
+    logic [63:0] constant_value, target_reg_value, source_a_value, source_b_value, secondary_input, computation_result, stack_address, memory_write_value, memory_access_address, memory_read_value, register_input_value;
+    logic memory_write_flag;
+    logic use_memory_address;
+    logic computation_start, register_read_start, register_write_start, fetch_start, memory_read_flag, memory_operation_start, computation_complete;
 
-    instructionDecoder instr_decoder(
-        .instructionLine(instr),
+    instructionDecoder instruction_parser(
+        .instructionLine(instruction_word),
         .clk(clk),
         .rst(reset),
-        .aluReady(alu_done),
-        .memEnable(mem_activate),
-        .literal(immediate),
-        .rd(dest_reg),
-        .rs(src_reg1),
-        .rt(src_reg2),
-        .opcode(operation),
-        .aluEnable(alu_activate),
-        .fetchEnable(fetch_activate),
-        .regReadEnable(reg_read_activate),
-        .regWriteEnable(reg_write_activate)
+        .aluReady(computation_complete),
+        .memEnable(memory_operation_start),
+        .literal(constant_value),
+        .rd(target_register),
+        .rs(source_register_a),
+        .rt(source_register_b),
+        .opcode(instruction_type),
+        .aluEnable(computation_start),
+        .fetchEnable(fetch_start),
+        .regReadEnable(register_read_start),
+        .regWriteEnable(register_write_start)
     );
 
-    fetch fetch_unit(
+    fetch instruction_fetcher(
         .clk(clk),
-        .fetchEnable(fetch_activate),
+        .fetchEnable(fetch_start),
         .reset(reset),
-        .next_pc(next_program_counter),
-        .pc(program_counter)
+        .next_pc(subsequent_address),
+        .pc(current_address)
     );
 
-    alu arithmetic_unit(
-        .aluEnable(alu_activate),
-        .control(operation),
-        .input1(src1_val),
-        .input2(alu_in2),
-        .inputPc(program_counter),
-        .r31(stack_pointer),
-        .rd(dest_val),
+    alu calculation_unit(
+        .aluEnable(computation_start),
+        .control(instruction_type),
+        .input1(source_a_value),
+        .input2(secondary_input),
+        .inputPc(current_address),
+        .r31(stack_address),
+        .rd(target_reg_value),
         .clk(clk),
-        .result(alu_result),
-        .pc(alu_program_counter),
-        .writeFlag(write_enable),
-        .memRead(mem_read),
-        .aluReady(alu_done),
-        .writeData(data_to_write),
-        .rwAddress(rw_addr),
+        .result(computation_result),
+        .pc(alu_calculated_address),
+        .writeFlag(memory_write_flag),
+        .memRead(memory_read_flag),
+        .aluReady(computation_complete),
+        .writeData(memory_write_value),
+        .rwAddress(memory_access_address),
         .hlt(hlt),
-        .mem_pc(mem_program_counter)
+        .mem_pc(use_memory_address)
     );
 
-    reglitmux reg_lit_mux(
-        .sel(operation),
-        .reg1(src2_val),
-        .lit(immediate),
-        .out(alu_in2)
+    reglitmux input_selector(
+        .sel(instruction_type),
+        .reg1(source_b_value),
+        .lit(constant_value),
+        .out(secondary_input)
     );
 
     registerFile reg_file(
-        .data(register_write_data),
-        .read1(src_reg1),
-        .read2(src_reg2),
-        .write(dest_reg),
+        .data(register_input_value),
+        .read1(source_register_a),
+        .read2(source_register_b),
+        .write(target_register),
         .reset(reset),
         .clk(clk),
-        .regReadEnable(reg_read_activate),
-        .regWriteEnable(reg_write_activate),
-        .output1(src1_val),
-        .output2(src2_val),
-        .output3(dest_val),
-        .stackPtr(stack_pointer)
+        .regReadEnable(register_read_start),
+        .regWriteEnable(register_write_start),
+        .output1(source_a_value),
+        .output2(source_b_value),
+        .output3(target_reg_value),
+        .stackPtr(stack_address)
     );
 
-    aluMemMux alu_mem_mux(
-        .mem_pc(mem_program_counter),
-        .memData(data_from_mem),
-        .aluOut(alu_program_counter),
-        .newPc(next_program_counter)
+    aluMemMux address_source_selector(
+        .mem_pc(use_memory_address),
+        .memData(memory_read_value),
+        .aluOut(alu_calculated_address),
+        .newPc(subsequent_address)
     );
 
     memory memory(
-        .pc(program_counter),
+        .pc(current_address),
         .clk(clk),
         .reset(reset),
-        .writeFlag(write_enable),
-        .fetchEnable(fetch_activate),
-        .memEnable(mem_activate),
-        .memRead(mem_read),
-        .writeData(data_to_write),
-        .rwAddress(rw_addr),
-        .readData(data_from_mem),
-        .instruction(instr)
+        .writeFlag(memory_write_flag),
+        .fetchEnable(fetch_start),
+        .memEnable(memory_operation_start),
+        .memRead(memory_read_flag),
+        .writeData(memory_write_value),
+        .rwAddress(memory_access_address),
+        .readData(memory_read_value),
+        .instruction(instruction_word)
     );
 
-    memRegMux mem_reg_mux(
-        .opcode(operation),
-        .readData(data_from_mem),
-        .aluResult(alu_result),
-        .regWriteData(register_write_data)
+    memRegMux data_source_selector(
+        .opcode(instruction_type),
+        .readData(memory_read_value),
+        .aluResult(computation_result),
+        .regWriteData(register_input_value)
     );
-
 endmodule
 
 module reglitmux (
@@ -145,11 +144,11 @@ module registerFile (
     output reg [63:0] stackPtr
 );
     reg [63:0] registers [0:31];
-    integer i;
+    integer idx;
 
     initial begin
-        for (i = 0; i < 31; i = i + 1) begin
-            registers[i] <= 64'b0;
+        for (idx = 0; idx < 31; idx = idx + 1) begin
+            registers[idx] <= 64'b0;
         end
         registers[31] <= 64'd524288;
     end
@@ -196,12 +195,12 @@ module memory (
     output reg [31:0] instruction
 );
     reg [7:0] bytes [0:524287];
-    integer i;
+    integer memory_index;
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            for (i = 0; i < 524288; i = i + 1) begin
-                bytes[i] <= 8'b0;
+            for (memory_index = 0; memory_index < 524288; memory_index = memory_index + 1) begin
+                bytes[memory_index] <= 8'b0;
             end
         end
     end
@@ -251,11 +250,11 @@ module instructionDecoder (
     output reg regReadEnable,
     output reg regWriteEnable
 );
-    reg [2:0] curr_state;
-    reg [4:0] op_cache;
+    reg [2:0] decoder_state;
+    reg [4:0] cached_opcode;
 
     always @(posedge rst) begin
-        if (rst) curr_state <= 3'b0;
+        if (rst) decoder_state <= 3'b0;
     end
 
     always @(posedge clk) begin
@@ -264,36 +263,36 @@ module instructionDecoder (
         regReadEnable <= 0;
         memEnable <= 0;
 
-        case (curr_state)
-            3'b0: curr_state <= 3'b1;
-            3'b1: curr_state <= 3'b10;
+        case (decoder_state)
+            3'b0: decoder_state <= 3'b1;
+            3'b1: decoder_state <= 3'b10;
             3'b10: begin
-                if (!aluReady) curr_state <= 3'b10;
-                else if (op_cache == 5'h10 || op_cache == 5'h13 || op_cache == 5'h0C || op_cache == 5'h0D) begin
-                    curr_state <= 3'b11;
+                if (!aluReady) decoder_state <= 3'b10;
+                else if (cached_opcode == 5'h10 || cached_opcode == 5'h13 || cached_opcode == 5'h0C || cached_opcode == 5'h0D) begin
+                    decoder_state <= 3'b11;
                 end
-                else if (op_cache == 5'h08 || op_cache == 5'h09 || op_cache == 5'h0A || op_cache == 5'h0B || op_cache == 5'h0E) begin
-                    curr_state <= 3'b0;
+                else if (cached_opcode == 5'h08 || cached_opcode == 5'h09 || cached_opcode == 5'h0A || cached_opcode == 5'h0B || cached_opcode == 5'h0E) begin
+                    decoder_state <= 3'b0;
                 end
-                else curr_state <= 3'b100;
+                else decoder_state <= 3'b100;
             end
             3'b11: begin
-                if (op_cache == 5'h10) curr_state <= 3'b100;
-                else curr_state <= 3'b0;
+                if (cached_opcode == 5'h10) decoder_state <= 3'b100;
+                else decoder_state <= 3'b0;
             end
-            3'b100: curr_state <= 3'b0;
+            3'b100: decoder_state <= 3'b0;
         endcase
     end
 
     always @(*) begin
-        case (curr_state)
+        case (decoder_state)
             3'b0: begin
                 fetchEnable = 1;
                 memEnable = 1;
             end
             3'b1: begin
                 opcode = instructionLine[31:27];
-                op_cache = opcode;
+                cached_opcode = opcode;
                 rd = instructionLine[26:22];
                 rs = instructionLine[21:17];
                 rt = instructionLine[16:12];
@@ -323,20 +322,20 @@ module fetch (
     input [63:0] next_pc,
     output reg [63:0] pc
 );
-    reg [63:0] pc_internal;
+    reg [63:0] address_register;
 
     always @(*) begin
-        if (fetchEnable) pc = pc_internal;
+        if (fetchEnable) pc = address_register;
     end
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            pc_internal <= 64'h2000;
+            address_register <= 64'h2000;
         end else if (fetchEnable) begin
             if (next_pc === 64'hx) begin
-                pc_internal = 64'h2000;
+                address_register = 64'h2000;
             end
-            else pc_internal <= next_pc;
+            else address_register <= next_pc;
         end
     end
 endmodule
@@ -367,9 +366,9 @@ module alu (
     output reg hlt,
     output reg mem_pc
 );
-    real float_in1, float_in2, float_result;
-    assign float_in1 = $bitstoreal(input1);
-    assign float_in2 = $bitstoreal(input2);
+    real float_operand1, float_operand2, float_output;
+    assign float_operand1 = $bitstoreal(input1);
+    assign float_operand2 = $bitstoreal(input2);
 
     always @(*) begin
         if (aluEnable) begin
@@ -409,20 +408,20 @@ module alu (
                     writeFlag = 1;
                 end
                 5'h14: begin
-                    float_result = float_in1 + float_in2;
-                    result = $realtobits(float_result);
+                    float_output = float_operand1 + float_operand2;
+                    result = $realtobits(float_output);
                 end
                 5'h15: begin
-                    float_result = float_in1 - float_in2;
-                    result = $realtobits(float_result);
+                    float_output = float_operand1 - float_operand2;
+                    result = $realtobits(float_output);
                 end
                 5'h16: begin
-                    float_result = float_in1 * float_in2;
-                    result = $realtobits(float_result);
+                    float_output = float_operand1 * float_operand2;
+                    result = $realtobits(float_output);
                 end
                 5'h17: begin
-                    float_result = float_in1 / float_in2;
-                    result = $realtobits(float_result);
+                    float_output = float_operand1 / float_operand2;
+                    result = $realtobits(float_output);
                 end
                 5'h08: begin
                     pc = rd;
