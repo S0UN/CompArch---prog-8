@@ -128,6 +128,7 @@ module tinker_core (
         .regWriteData(register_input_value)
     );
 endmodule
+
 module reglitmux (
     input [4:0] sel,
     input [63:0] reg1,
@@ -161,6 +162,7 @@ module registerFile (
     reg [63:0] registers [0:31];
     integer idx;
 
+    // Initialize registers
     initial begin
         for (idx = 0; idx < 31; idx = idx + 1) begin
             registers[idx] <= 64'b0;
@@ -168,20 +170,25 @@ module registerFile (
         registers[31] <= 64'd524288;
     end
 
+    // Continuous assignment for stack pointer
     assign stackPtr = registers[31];
+
+    // Read and write operations
     always @(*) begin
         if (regReadFlag) begin
             output1 = registers[read1];
             output2 = registers[read2];
             output3 = registers[write];
         end
+    end
 
+    // Write operation 
+    always @(*) begin
         if (regWriteFlag) begin
             registers[write] = data;
         end
     end
 endmodule
-
 module memRegMux (
     input [4:0] opcode,
     input [63:0] readData,
@@ -189,10 +196,10 @@ module memRegMux (
     output reg [63:0] regWriteData
 );
     always @(*) begin
-        case (opcode)
-            5'h10: regWriteData = readData;
-            default: regWriteData = aluResult;
-        endcase
+        if (opcode == 5'h10)
+            regWriteData = readData;
+        else
+            regWriteData = aluResult;
     end
 endmodule
 
@@ -212,6 +219,7 @@ module memory (
     reg [7:0] bytes [0:524287];
     integer memory_index;
 
+    // Reset memory on positive edge of reset
     always @(posedge clk or posedge reset) begin
         if (reset) begin
             for (memory_index = 0; memory_index < 524288; memory_index = memory_index + 1) begin
@@ -220,15 +228,18 @@ module memory (
         end
     end
 
-    assign instruction[7:0] = bytes[pc];
-    assign instruction[15:8] = bytes[pc+1];
+    // Instruction fetch (continuous assignment)
+    assign instruction[7:0]   = bytes[pc];
+    assign instruction[15:8]  = bytes[pc+1];
     assign instruction[23:16] = bytes[pc+2];
     assign instruction[31:24] = bytes[pc+3];
 
+    // Memory read and write operations
     always @(memFlag) begin
+        // Read operation
         if (memRead) begin
-            readData[7:0] = bytes[rwAddress];
-            readData[15:8] = bytes[rwAddress+1];
+            readData[7:0]   = bytes[rwAddress];
+            readData[15:8]  = bytes[rwAddress+1];
             readData[23:16] = bytes[rwAddress+2];
             readData[31:24] = bytes[rwAddress+3];
             readData[39:32] = bytes[rwAddress+4];
@@ -236,8 +247,10 @@ module memory (
             readData[55:48] = bytes[rwAddress+6];
             readData[63:56] = bytes[rwAddress+7];
         end
+
+        // Write operation
         if (writeFlag) begin
-            bytes[rwAddress] = writeData[7:0];
+            bytes[rwAddress]   = writeData[7:0];
             bytes[rwAddress+1] = writeData[15:8];
             bytes[rwAddress+2] = writeData[23:16];
             bytes[rwAddress+3] = writeData[31:24];
