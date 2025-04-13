@@ -414,7 +414,6 @@ module instructionDecoder (
             end
             
             default: begin
-                // Default: all signals inactive
                 fetchFlag = 0;
                 memFlag = 0;
                 aluEnable = 0;
