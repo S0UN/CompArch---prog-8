@@ -1,7 +1,7 @@
 // Multicycle Tinker Processor
 
 // Top-Level Module
-module tinker_processor (
+module tinker_core (
     input wire clock,
     input wire rst,
     output wire halt_signal
@@ -27,7 +27,7 @@ module tinker_processor (
     );
 
     // Memory Unit
-    data_memory mem_inst (
+    data_memory memory (
         .clk(clock),
         .reset(rst),
         .write_enable(memory_write_enable),
@@ -59,7 +59,7 @@ module tinker_processor (
     );
 
     // Register File
-    register_bank reg_inst (
+    register_bank reg_file (
         .clk(clock),
         .reset(rst),
         .read_en(reg_read_active),
