@@ -86,7 +86,7 @@ module tinker_core (
         .newPc(next_pc)
     );
 
-    memory mem_unit(
+    memory memory(
         .pc(pc),
         .clk(clk),
         .reset(reset),
