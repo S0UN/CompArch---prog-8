@@ -3,40 +3,95 @@ module tinker_core (
     input reset,
     output hlt
 );
-    
-    logic [4:0] target_register, source_register_a, source_register_b, instruction_type;
+    // Instruction-related signals
     logic [31:0] instruction_word;
-    logic [63:0] subsequent_address, current_address, alu_calculated_address;
-    logic [63:0] constant_value, target_reg_value, source_a_value, source_b_value, secondary_input, computation_result, stack_address, memory_write_value, memory_access_address, memory_read_value, register_input_value;
-    logic memory_write_flag;
-    logic use_memory_address;
-    logic computation_start, register_read_start, register_write_start, fetch_start, memory_read_flag, memory_operation_start, computation_complete;
+    logic [4:0] instruction_type;
+    logic [4:0] target_register, source_register_a, source_register_b;
+    
+    // Address-related signals
+    logic [63:0] current_address, subsequent_address, alu_calculated_address;
+    
+    // Data signals
+    logic [63:0] constant_value;
+    logic [63:0] source_a_value, source_b_value, target_reg_value;
+    logic [63:0] secondary_input, computation_result;
+    logic [63:0] stack_address;
+    logic [63:0] memory_write_value, memory_access_address, memory_read_value;
+    logic [63:0] register_input_value;
+    
+    // Control signals
+    logic memory_write_flag, use_memory_address, memory_read_flag;
+    logic computation_start, computation_complete;
+    logic register_read_start, register_write_start;
+    logic fetch_start, memory_operation_start;
 
+    // Fetch unit - handles instruction fetching
+    fetch instruction_fetcher(
+        .clk(clk),
+        .fetchFlag(fetch_start),
+        .reset(reset),
+        .next_pc(subsequent_address),
+        .pc(current_address)
+    );
+    
+    // Memory module - handles memory operations and instruction storage
+    memory memory(
+        .pc(current_address),
+        .clk(clk),
+        .reset(reset),
+        .writeFlag(memory_write_flag),
+        .fetchFlag(fetch_start),
+        .memFlag(memory_operation_start),
+        .memRead(memory_read_flag),
+        .writeData(memory_write_value),
+        .rwAddress(memory_access_address),
+        .readData(memory_read_value),
+        .instruction(instruction_word)
+    );
+
+    // Instruction decoder - decodes fetched instructions
     instructionDecoder instruction_parser(
         .instructionLine(instruction_word),
         .clk(clk),
         .rst(reset),
-        .aluReady(computation_complete),
-        .memEnable(memory_operation_start),
+        .aluDone(computation_complete),
+        .memFlag(memory_operation_start),
         .literal(constant_value),
         .rd(target_register),
         .rs(source_register_a),
         .rt(source_register_b),
         .opcode(instruction_type),
         .aluEnable(computation_start),
-        .fetchEnable(fetch_start),
-        .regReadEnable(register_read_start),
-        .regWriteEnable(register_write_start)
+        .fetchFlag(fetch_start),
+        .regReadFlag(register_read_start),
+        .regWriteFlag(register_write_start)
     );
 
-    fetch instruction_fetcher(
-        .clk(clk),
-        .fetchEnable(fetch_start),
+    // Register file - manages CPU registers
+    registerFile reg_file(
+        .data(register_input_value),
+        .read1(source_register_a),
+        .read2(source_register_b),
+        .write(target_register),
         .reset(reset),
-        .next_pc(subsequent_address),
-        .pc(current_address)
+        .clk(clk),
+        .regReadFlag(register_read_start),
+        .regWriteFlag(register_write_start),
+        .output1(source_a_value),
+        .output2(source_b_value),
+        .output3(target_reg_value),
+        .stackPtr(stack_address)
     );
 
+    // Input selector - selects between register or immediate value
+    reglitmux input_selector(
+        .sel(instruction_type),
+        .reg1(source_b_value),
+        .lit(constant_value),
+        .out(secondary_input)
+    );
+
+    // ALU - handles computational operations
     alu calculation_unit(
         .aluEnable(computation_start),
         .control(instruction_type),
@@ -50,35 +105,14 @@ module tinker_core (
         .pc(alu_calculated_address),
         .writeFlag(memory_write_flag),
         .memRead(memory_read_flag),
-        .aluReady(computation_complete),
+        .aluDone(computation_complete),
         .writeData(memory_write_value),
         .rwAddress(memory_access_address),
         .hlt(hlt),
         .mem_pc(use_memory_address)
     );
 
-    reglitmux input_selector(
-        .sel(instruction_type),
-        .reg1(source_b_value),
-        .lit(constant_value),
-        .out(secondary_input)
-    );
-
-    registerFile reg_file(
-        .data(register_input_value),
-        .read1(source_register_a),
-        .read2(source_register_b),
-        .write(target_register),
-        .reset(reset),
-        .clk(clk),
-        .regReadEnable(register_read_start),
-        .regWriteEnable(register_write_start),
-        .output1(source_a_value),
-        .output2(source_b_value),
-        .output3(target_reg_value),
-        .stackPtr(stack_address)
-    );
-
+    // Address source selector - selects next program counter value
     aluMemMux address_source_selector(
         .mem_pc(use_memory_address),
         .memData(memory_read_value),
@@ -86,20 +120,7 @@ module tinker_core (
         .newPc(subsequent_address)
     );
 
-    memory memory(
-        .pc(current_address),
-        .clk(clk),
-        .reset(reset),
-        .writeFlag(memory_write_flag),
-        .fetchEnable(fetch_start),
-        .memEnable(memory_operation_start),
-        .memRead(memory_read_flag),
-        .writeData(memory_write_value),
-        .rwAddress(memory_access_address),
-        .readData(memory_read_value),
-        .instruction(instruction_word)
-    );
-
+    // Data source selector - selects write data for registers
     memRegMux data_source_selector(
         .opcode(instruction_type),
         .readData(memory_read_value),
@@ -107,7 +128,6 @@ module tinker_core (
         .regWriteData(register_input_value)
     );
 endmodule
-
 module reglitmux (
     input [4:0] sel,
     input [63:0] reg1,
@@ -115,17 +135,12 @@ module reglitmux (
     output reg [63:0] out
 );
     always @(*) begin
-        case (sel)
-            5'b11001: out = lit;
-            5'b11011: out = lit;
-            5'b00101: out = lit;
-            5'b00111: out = lit;
-            5'b10010: out = lit;
-            5'b01010: out = lit;
-            5'h10: out = lit;
-            5'h13: out = lit;
-            default: out = reg1;
-        endcase
+        if (sel == 5'b11001 || sel == 5'b11011 || sel == 5'b00101 || 
+            sel == 5'b00111 || sel == 5'b10010 || sel == 5'b01010 || 
+            sel == 5'h10    || sel == 5'h13)
+            out = lit;
+        else
+            out = reg1;
     end
 endmodule
 
@@ -136,8 +151,8 @@ module registerFile (
     input [4:0] write,
     input reset,
     input clk,
-    input regReadEnable,
-    input regWriteEnable,
+    input regReadFlag,
+    input regWriteFlag,
     output reg [63:0] output1,
     output reg [63:0] output2,
     output reg [63:0] output3,
@@ -155,13 +170,13 @@ module registerFile (
 
     assign stackPtr = registers[31];
     always @(*) begin
-        if (regReadEnable) begin
+        if (regReadFlag) begin
             output1 = registers[read1];
             output2 = registers[read2];
             output3 = registers[write];
         end
 
-        if (regWriteEnable) begin
+        if (regWriteFlag) begin
             registers[write] = data;
         end
     end
@@ -186,8 +201,8 @@ module memory (
     input clk,
     input reset,
     input writeFlag,
-    input fetchEnable,
-    input memEnable,
+    input fetchFlag,
+    input memFlag,
     input memRead,
     input [63:0] writeData,
     input [63:0] rwAddress,
@@ -210,7 +225,7 @@ module memory (
     assign instruction[23:16] = bytes[pc+2];
     assign instruction[31:24] = bytes[pc+3];
 
-    always @(memEnable) begin
+    always @(memFlag) begin
         if (memRead) begin
             readData[7:0] = bytes[rwAddress];
             readData[15:8] = bytes[rwAddress+1];
@@ -238,17 +253,17 @@ module instructionDecoder (
     input [31:0] instructionLine,
     input clk,
     input rst,
-    input aluReady,
-    output reg fetchEnable,
-    output reg memEnable,
+    input aluDone,
+    output reg fetchFlag,
+    output reg memFlag,
     output reg [63:0] literal,
     output reg [4:0] rd,
     output reg [4:0] rs,
     output reg [4:0] rt,
     output reg [4:0] opcode,
     output reg aluEnable,
-    output reg regReadEnable,
-    output reg regWriteEnable
+    output reg regReadFlag,
+    output reg regWriteFlag
 );
     reg [2:0] decoder_state;
     reg [4:0] cached_opcode;
@@ -259,15 +274,15 @@ module instructionDecoder (
 
     always @(posedge clk) begin
         aluEnable <= 0;
-        regWriteEnable <= 0;
-        regReadEnable <= 0;
-        memEnable <= 0;
+        regWriteFlag <= 0;
+        regReadFlag <= 0;
+        memFlag <= 0;
 
         case (decoder_state)
             3'b0: decoder_state <= 3'b1;
             3'b1: decoder_state <= 3'b10;
             3'b10: begin
-                if (!aluReady) decoder_state <= 3'b10;
+                if (!aluDone) decoder_state <= 3'b10;
                 else if (cached_opcode == 5'h10 || cached_opcode == 5'h13 || cached_opcode == 5'h0C || cached_opcode == 5'h0D) begin
                     decoder_state <= 3'b11;
                 end
@@ -287,8 +302,8 @@ module instructionDecoder (
     always @(*) begin
         case (decoder_state)
             3'b0: begin
-                fetchEnable = 1;
-                memEnable = 1;
+                fetchFlag = 1;
+                memFlag = 1;
             end
             3'b1: begin
                 opcode = instructionLine[31:27];
@@ -306,18 +321,18 @@ module instructionDecoder (
                     5'b10010: rs = rd;
                 endcase
 
-                regReadEnable = 1;
+                regReadFlag = 1;
             end
             3'b10: aluEnable = 1;
-            3'b11: memEnable = 1;
-            3'b100: regWriteEnable = 1;
+            3'b11: memFlag = 1;
+            3'b100: regWriteFlag = 1;
         endcase
     end
 endmodule
 
 module fetch (
     input clk,
-    input fetchEnable,
+    input fetchFlag,
     input reset,
     input [63:0] next_pc,
     output reg [63:0] pc
@@ -325,13 +340,13 @@ module fetch (
     reg [63:0] address_register;
 
     always @(*) begin
-        if (fetchEnable) pc = address_register;
+        if (fetchFlag) pc = address_register;
     end
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
             address_register <= 64'h2000;
-        end else if (fetchEnable) begin
+        end else if (fetchFlag) begin
             if (next_pc === 64'hx) begin
                 address_register = 64'h2000;
             end
@@ -361,7 +376,7 @@ module alu (
     output reg [63:0] result,
     output reg [63:0] writeData,
     output reg [63:0] rwAddress,
-    output reg aluReady, writeFlag, memRead,
+    output reg aluDone, writeFlag, memRead,
     output reg [63:0] pc,
     output reg hlt,
     output reg mem_pc
@@ -461,11 +476,11 @@ module alu (
                     hlt = 1;
                 end
             endcase
-            aluReady = 1;
+            aluDone = 1;
         end
         else begin
             hlt = 0;
-            aluReady = 0;
+            aluDone = 0;
         end
     end
 endmodule
