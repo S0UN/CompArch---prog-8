@@ -2,9 +2,9 @@
 
 // Top-Level Module
 module tinker_core (
-    input wire clock,
-    input wire rst,
-    output wire halt_signal
+    input wire clk,
+    input wire reset,
+    output logic hlt
 );
 
     // Internal signals
@@ -19,8 +19,8 @@ module tinker_core (
 
     // Instruction Fetch Unit
     instruction_fetch fetch_inst (
-        .clk(clock),
-        .reset(rst),
+        .clk(clk),
+        .reset(reset),
         .enable_fetch(fetch_active),
         .pc_input(next_program_counter),
         .pc_output(program_counter)
@@ -28,8 +28,8 @@ module tinker_core (
 
     // Memory Unit
     data_memory memory (
-        .clk(clock),
-        .reset(rst),
+        .clk(clk),
+        .reset(reset),
         .write_enable(memory_write_enable),
         .enable_access(mem_access_active),
         .read_enable(mem_read_enable),
@@ -42,8 +42,8 @@ module tinker_core (
 
     // Instruction Decoder
     decode_unit decode_inst (
-        .clk(clock),
-        .reset(rst),
+        .clk(clk),
+        .reset(reset),
         .alu_complete(alu_done),
         .instr(instruction_data),
         .op_code(operation_code),
@@ -60,8 +60,8 @@ module tinker_core (
 
     // Register File
     register_bank reg_file (
-        .clk(clock),
-        .reset(rst),
+        .clk(clk),
+        .reset(reset),
         .read_en(reg_read_active),
         .write_en(reg_write_active),
         .data_in(reg_write_data),
@@ -84,7 +84,7 @@ module tinker_core (
         .curr_pc(program_counter),
         .stack_val(stack_pointer),
         .done(alu_done),
-        .halt(halt_signal),
+        .halt(hlt),
         .mem_read(mem_read_enable),
         .mem_write(memory_write_enable),
         .select_mem_pc(select_mem_pc),
