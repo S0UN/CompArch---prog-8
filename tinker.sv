@@ -279,47 +279,105 @@ module instructionDecoder (
     output reg regReadFlag,
     output reg regWriteFlag
 );
-    reg [2:0] decoder_state;
+    // Pipeline stage state definitions
+    localparam FETCH      = 3'b000;  // Fetch instruction
+    localparam DECODE     = 3'b001;  // Decode instruction and read registers
+    localparam EXECUTE    = 3'b010;  // Execute operation in ALU
+    localparam MEMORY     = 3'b011;  // Memory access stage
+    localparam WRITEBACK  = 3'b100;  // Write results back to registers
+    
+    // Instruction opcodes from Tinker ISA
+    localparam MOV_MEM    = 5'h10;   // mov rd, (rs)(L)
+    localparam MOV_STR    = 5'h13;   // mov (rd)(L), rs
+    localparam CALL       = 5'h0C;   // call rd, rs, rt
+    localparam RETURN     = 5'h0D;   // return
+    localparam BR         = 5'h08;   // br rd
+    localparam BRR        = 5'h09;   // brr rd
+    localparam BRRI       = 5'h0A;   // brr L
+    localparam BRNZ       = 5'h0B;   // brnz rd, rs
+    localparam BRGT       = 5'h0E;   // brgt rd, rs, rt
+    
+    // Internal state register
+    reg [2:0] pipeline_stage;
     reg [4:0] cached_opcode;
 
+    // Reset logic
     always @(posedge rst) begin
-        if (rst) decoder_state <= 3'b0;
+        if (rst) pipeline_stage <= FETCH;
     end
 
+    // State transition logic
     always @(posedge clk) begin
+        // Default: disable all control signals at start of clock cycle
         aluEnable <= 0;
         regWriteFlag <= 0;
         regReadFlag <= 0;
         memFlag <= 0;
 
-        case (decoder_state)
-            3'b0: decoder_state <= 3'b1;
-            3'b1: decoder_state <= 3'b10;
-            3'b10: begin
-                if (!aluDone) decoder_state <= 3'b10;
-                else if (cached_opcode == 5'h10 || cached_opcode == 5'h13 || cached_opcode == 5'h0C || cached_opcode == 5'h0D) begin
-                    decoder_state <= 3'b11;
-                end
-                else if (cached_opcode == 5'h08 || cached_opcode == 5'h09 || cached_opcode == 5'h0A || cached_opcode == 5'h0B || cached_opcode == 5'h0E) begin
-                    decoder_state <= 3'b0;
-                end
-                else decoder_state <= 3'b100;
+        case (pipeline_stage)
+            FETCH: begin
+                // After fetch, move to decode
+                pipeline_stage <= DECODE;
             end
-            3'b11: begin
-                if (cached_opcode == 5'h10) decoder_state <= 3'b100;
-                else decoder_state <= 3'b0;
+            
+            DECODE: begin
+                // After decode, move to execute
+                pipeline_stage <= EXECUTE;
             end
-            3'b100: decoder_state <= 3'b0;
+            
+            EXECUTE: begin
+                if (!aluDone) begin
+                    // Stay in execute until ALU finishes
+                    pipeline_stage <= EXECUTE;
+                end
+                else if (cached_opcode == MOV_MEM || cached_opcode == MOV_STR || 
+                         cached_opcode == CALL || cached_opcode == RETURN) begin
+                    // Memory operations need memory access stage
+                    pipeline_stage <= MEMORY;
+                end
+                else if (cached_opcode == BR || cached_opcode == BRR || 
+                         cached_opcode == BRRI || cached_opcode == BRNZ || 
+                         cached_opcode == BRGT) begin
+                    // Branch operations skip to fetch
+                    pipeline_stage <= FETCH;
+                end
+                else begin
+                    // Other operations go to writeback
+                    pipeline_stage <= WRITEBACK;
+                end
+            end
+            
+            MEMORY: begin
+                if (cached_opcode == MOV_MEM) begin
+                    // Load operations need writeback
+                    pipeline_stage <= WRITEBACK;
+                end
+                else begin
+                    // Store operations go back to fetch
+                    pipeline_stage <= FETCH;
+                end
+            end
+            
+            WRITEBACK: begin
+                // After writeback, go back to fetch
+                pipeline_stage <= FETCH;
+            end
+            
+            default: pipeline_stage <= FETCH;
         endcase
     end
 
+    // Output and control signal generation
     always @(*) begin
-        case (decoder_state)
-            3'b0: begin
+        case (pipeline_stage)
+            FETCH: begin
+                // Fetch stage: activate fetch signals
                 fetchFlag = 1;
                 memFlag = 1;
             end
-            3'b1: begin
+            
+            DECODE: begin
+                // Decode stage: extract instruction fields
                 opcode = instructionLine[31:27];
                 cached_opcode = opcode;
                 rd = instructionLine[26:22];
@@ -327,19 +385,42 @@ module instructionDecoder (
                 rt = instructionLine[16:12];
                 literal = {52'b0, instructionLine[11:0]};
 
+                // Handle special register addressing modes for certain instructions
                 case (opcode)
-                    5'b11001: rs = rd;
-                    5'b11011: rs = rd;
-                    5'b00101: rs = rd;
-                    5'b00111: rs = rd;
-                    5'b10010: rs = rd;
+                    5'b11001: rs = rd;  // addi rd, L
+                    5'b11011: rs = rd;  // subi rd, L
+                    5'b00101: rs = rd;  // shftri rd, L
+                    5'b00111: rs = rd;  // shftli rd, L
+                    5'b10010: rs = rd;  // mov rd, L
                 endcase
 
+                // Activate register read
                 regReadFlag = 1;
             end
-            3'b10: aluEnable = 1;
-            3'b11: memFlag = 1;
-            3'b100: regWriteFlag = 1;
+            
+            EXECUTE: begin
+                // Execute stage: activate ALU
+                aluEnable = 1;
+            end
+            
+            MEMORY: begin
+                // Memory stage: activate memory access
+                memFlag = 1;
+            end
+            
+            WRITEBACK: begin
+                // Writeback stage: write to register file
+                regWriteFlag = 1;
+            end
+            
+            default: begin
+                // Default: all signals inactive
+                fetchFlag = 0;
+                memFlag = 0;
+                aluEnable = 0;
+                regReadFlag = 0;
+                regWriteFlag = 0;
+            end
         endcase
     end
 endmodule
