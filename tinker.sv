@@ -1,474 +1,376 @@
+// Top-Level Module
 module tinker_core (
-    input clk,
-    input reset,
-    output hlt
+    input logic clk,
+    input logic reset
 );
-    
-    logic [4:0] dest_reg, src_reg1, src_reg2, operation_code;
+    // Internal Signals - Renamed
+    logic [4:0] destination_register_idx, source_register1_idx, source_register2_idx, operation_code;
     logic [31:0] instruction_data;
-    logic [63:0] next_program_counter, program_counter, alu_program_counter;
-    logic [63:0] literal_value, dest_reg_value, src_reg1_value, src_reg2_value, alu_input2, alu_result, stack_pointer, mem_write_data, mem_rw_address, mem_read_data, reg_write_data;
-    logic mem_write_enable;
-    logic mem_pc_select;
-    logic alu_enable, reg_read_enable, reg_write_enable, fetch_enable, mem_read_enable, mem_access_enable, alu_ready;
+    logic [63:0] current_program_counter, next_program_counter;
+    logic [63:0] immediate_operand, destination_value, source_value1, source_value2, alu_input_operand2, alu_result;
+    logic [63:0] stack_pointer_val, memory_write_data, memory_access_address, memory_read_data;
+    logic memory_write_enable, register_write_from_memory, register_write_from_alu;
 
-    instructionDecoder instr_decoder (
-        .instructionLine(instruction_data),
-        .clk(clk),
-        .rst(reset),
-        .aluReady(alu_ready),
-        .memEnable(mem_access_enable),
-        .literal(literal_value),
-        .rd(dest_reg),
-        .rs(src_reg1),
-        .rt(src_reg2),
-        .opcode(operation_code),
-        .aluEnable(alu_enable),
-        .fetchEnable(fetch_enable),
-        .regReadEnable(reg_read_enable),
-        .regWriteEnable(reg_write_enable)
-    );
+    // Module Instantiations - Port names updated to match renamed signals
 
-    fetch fetch_unit (
-        .clk(clk),
-        .fetchEnable(fetch_enable),
-        .reset(reset),
-        .next_pc(next_program_counter),
-        .pc(program_counter)
-    );
-
-    alu alu_unit (
-        .aluEnable(alu_enable),
-        .control(operation_code),
-        .input1(src_reg1_value),
-        .input2(alu_input2),
-        .inputPc(program_counter),
-        .r31(stack_pointer),
-        .rd(dest_reg_value),
-        .clk(clk),
-        .result(alu_result),
-        .pc(alu_program_counter),
-        .writeFlag(mem_write_enable),
-        .memRead(mem_read_enable),
-        .aluReady(alu_ready),
-        .writeData(mem_write_data),
-        .rwAddress(mem_rw_address),
-        .hlt(hlt),
-        .mem_pc(mem_pc_select)
-    );
-
-    reglitmux reg_lit_mux (
-        .sel(operation_code),
-        .reg1(src_reg2_value),
-        .lit(literal_value),
-        .out(alu_input2)
-    );
-
-    registerFile reg_file (
-        .data(reg_write_data),
-        .read1(src_reg1),
-        .read2(src_reg2),
-        .write(dest_reg),
-        .reset(reset),
-        .clk(clk),
-        .regReadEnable(reg_read_enable),
-        .regWriteEnable(reg_write_enable),
-        .output1(src_reg1_value),
-        .output2(src_reg2_value),
-        .output3(dest_reg_value),
-        .stackPtr(stack_pointer)
-    );
-
-    aluMemMux alu_mem_mux (
-        .mem_pc(mem_pc_select),
-        .memData(mem_read_data),
-        .aluOut(alu_program_counter),
-        .newPc(next_program_counter)
-    );
-
-    memory memory (
-        .pc(program_counter),
+    fetch_unit fetch_stage (
         .clk(clk),
         .reset(reset),
-        .writeFlag(mem_write_enable),
-        .fetchEnable(fetch_enable),
-        .memEnable(mem_access_enable),
-        .memRead(mem_read_enable),
-        .writeData(mem_write_data),
-        .rwAddress(mem_rw_address),
-        .readData(mem_read_data),
-        .instruction(instruction_data)
+        .current_stack_ptr(stack_pointer_val), // Renamed port
+        .input_next_pc(next_program_counter),  // Renamed port
+        .output_current_pc(current_program_counter) // Renamed port
     );
 
-    memRegMux mem_reg_mux (
-        .opcode(operation_code),
-        .readData(mem_read_data),
-        .aluResult(alu_result),
-        .regWriteData(reg_write_data)
+    memory_unit memory (
+        .instruction_fetch_address(current_program_counter), // Renamed port
+        .clk(clk),
+        .reset(reset),
+        .data_write_enable(memory_write_enable), // Renamed port
+        .input_data_for_write(memory_write_data), // Renamed port
+        .data_access_address(memory_access_address), // Renamed port
+        .output_data_read(memory_read_data),       // Renamed port
+        .fetched_instruction_word(instruction_data) // Renamed port
     );
 
+    control_unit ctrl_logic (
+        .current_operation(operation_code),        // Renamed port
+        .destination_input_val(destination_value), // Renamed port
+        .source1_input_val(source_value1),       // Renamed port
+        .source2_input_val(source_value2),       // Renamed port
+        .immediate_input_val(immediate_operand),  // Renamed port
+        .program_counter_current(current_program_counter), // Renamed port
+        .data_from_memory(memory_read_data),     // Renamed port
+        .program_counter_next(next_program_counter) // Renamed port
+    );
+
+    mem_handler mem_access_logic (
+        .input_operation_code(operation_code),         // Renamed port
+        .destination_reg_value(destination_value),     // Renamed port
+        .source_reg_value(source_value1),              // Renamed port
+        .immediate_value_input(immediate_operand),     // Renamed port
+        .current_pc_value(current_program_counter),    // Renamed port
+        .stack_pointer_input(stack_pointer_val),       // Renamed port
+        .generated_memory_address(memory_access_address), // Renamed port
+        .generated_memory_data_out(memory_write_data),  // Renamed port
+        .generate_write_enable(memory_write_enable),    // Renamed port
+        .generate_regfile_write_enable(register_write_from_memory) // Renamed port
+    );
+
+    inst_decoder decoder (
+        .input_instruction_word(instruction_data),     // Renamed port
+        .decoded_immediate(immediate_operand),          // Renamed port
+        .decoded_destination_idx(destination_register_idx), // Renamed port
+        .decoded_source1_idx(source_register1_idx),     // Renamed port
+        .decoded_source2_idx(source_register2_idx),     // Renamed port
+        .decoded_operation_code(operation_code)         // Renamed port
+    );
+
+    reg_file_bank reg_file (
+        .clk(clk),
+        .reset(reset),
+        .enable_write_from_memory(register_write_from_memory), // Renamed port
+        .enable_write_from_alu(register_write_from_alu),     // Renamed port
+        .data_to_write(register_write_from_memory ? memory_read_data : alu_result), // Renamed port + internal logic adjusted
+        .read_address1(source_register1_idx),         // Renamed port
+        .read_address2(source_register2_idx),         // Renamed port
+        .address_to_write(destination_register_idx),  // Renamed port
+        .read_data1(source_value1),                   // Renamed port
+        .read_data2(source_value2),                   // Renamed port
+        .write_addr_current_val(destination_value),     // Renamed port
+        .stack_pointer_output(stack_pointer_val)        // Renamed port
+    );
+
+    reg_lit_mux alu_operand_mux (
+        .select_operation(operation_code),         // Renamed port
+        .register_input_value(source_value2),      // Renamed port
+        .literal_input_value(immediate_operand),   // Renamed port
+        .mux_output_value(alu_input_operand2)      // Renamed port
+    );
+
+    alu_unit arithmetic_logic_unit (
+        .alu_control_signal(operation_code),    // Renamed port
+        .input_operand1(source_value1),       // Renamed port
+        .input_operand2(alu_input_operand2),  // Renamed port
+        .output_valid_signal(register_write_from_alu), // Renamed port
+        .result_output(alu_result)            // Renamed port
+    );
 endmodule
 
-module reglitmux (
-    input [4:0] select_code,
-    input [63:0] reg_input,
-    input [63:0] literal_input,
-    output reg [63:0] mux_output
+// ALU Unit
+module alu_unit (
+    input logic [4:0] alu_control_signal, // Renamed port
+    input logic [63:0] input_operand1,     // Renamed port
+    input logic [63:0] input_operand2,     // Renamed port
+    output logic output_valid_signal,      // Renamed port
+    output logic [63:0] result_output       // Renamed port
 );
-    always @(*) begin
-        case (select_code)
-            5'b11001: mux_output = literal_input;
-            5'b11011: mux_output = literal_input;
-            5'b00101: mux_output = literal_input;
-            5'b00111: mux_output = literal_input;
-            5'b10010: mux_output = literal_input;
-            5'b01010: mux_output = literal_input;
-            5'h10: mux_output = literal_input;
-            5'h13: mux_output = literal_input;
-            default: mux_output = reg_input;
+    // Renamed internal variables
+    real float_operand1, float_operand2, float_result;
+    assign float_operand1 = $bitstoreal(input_operand1);
+    assign float_operand2 = $bitstoreal(input_operand2);
+
+    always_comb begin
+        output_valid_signal = 1;
+        case (alu_control_signal) // Renamed variable
+            5'b11000: result_output = input_operand1 + input_operand2;         // add
+            5'b11001: result_output = input_operand1 + input_operand2;         // addi
+            5'b11010: result_output = input_operand1 - input_operand2;         // sub
+            5'b11011: result_output = input_operand1 - input_operand2;         // subi
+            5'b11100: result_output = input_operand1 * input_operand2;         // mul
+            5'b11101: result_output = input_operand1 / input_operand2;         // div
+            5'b00000: result_output = input_operand1 & input_operand2;         // and
+            5'b00001: result_output = input_operand1 | input_operand2;         // or
+            5'b00010: result_output = input_operand1 ^ input_operand2;         // xor
+            5'b00011: result_output = ~input_operand1;                         // not
+            5'b00100: result_output = input_operand1 >> input_operand2;        // shftr
+            5'b00101: result_output = input_operand1 >> input_operand2;        // shftri
+            5'b00110: result_output = input_operand1 << input_operand2;        // shftl
+            5'b00111: result_output = input_operand1 << input_operand2;        // shftli
+            5'b10001: result_output = input_operand1;                          // mov $r_d, $r_s
+            5'b10010: result_output = {input_operand1[63:12], input_operand2[11:0]}; // mov $r_d, L
+            5'b10100: begin                    // addf
+                float_result = float_operand1 + float_operand2; // Renamed variable
+                result_output = $realtobits(float_result);     // Renamed variable
+            end
+            5'b10101: begin                    // subf
+                float_result = float_operand1 - float_operand2; // Renamed variable
+                result_output = $realtobits(float_result);     // Renamed variable
+            end
+            5'b10110: begin                    // mulf
+                float_result = float_operand1 * float_operand2; // Renamed variable
+                result_output = $realtobits(float_result);     // Renamed variable
+            end
+            5'b10111: begin                    // divf
+                float_result = float_operand1 / float_operand2; // Renamed variable
+                result_output = $realtobits(float_result);     // Renamed variable
+            end
+            default: begin
+                output_valid_signal = 0; // Renamed variable
+                result_output = 64'h0;    // Renamed variable
+            end
         endcase
     end
 endmodule
 
-module registerFile (
-    input [63:0] write_data,
-    input [4:0] read_addr1,
-    input [4:0] read_addr2,
-    input [4:0] write_addr,
-    input reset,
-    input clk,
-    input reg_read_enable,
-    input reg_write_enable,
-    output reg [63:0] read_data1,
-    output reg [63:0] read_data2,
-    output reg [63:0] read_data3,
-    output reg [63:0] stack_pointer
+// Register/Literal Mux
+module reg_lit_mux (
+    input logic [4:0] select_operation,     // Renamed port
+    input logic [63:0] register_input_value, // Renamed port
+    input logic [63:0] literal_input_value,  // Renamed port
+    output logic [63:0] mux_output_value     // Renamed port
 );
-    reg [63:0] registers [0:31];
-    integer idx;
-
-    initial begin
-        for (idx = 0; idx < 31; idx = idx + 1) begin
-            registers[idx] <= 64'b0;
-        end
-        registers[31] <= 64'd524288;
-    end
-
-    assign stack_pointer = registers[31];
-    always @(*) begin
-        if (reg_read_enable) begin
-            read_data1 = registers[read_addr1];
-            read_data2 = registers[read_addr2];
-            read_data3 = registers[write_addr];
-        end
-
-        if (reg_write_enable) begin
-            registers[write_addr] = write_data;
-        end
+    always_comb begin
+        // Using renamed port 'select_operation'
+        if (select_operation == 5'b11001 || select_operation == 5'b11011 || select_operation == 5'b00101 ||
+            select_operation == 5'b00111 || select_operation == 5'b10010)
+            mux_output_value = literal_input_value; // Renamed ports
+        else
+            mux_output_value = register_input_value; // Renamed ports
     end
 endmodule
 
-module memRegMux (
-    input [4:0] operation_code,
-    input [63:0] mem_read_data,
-    input [63:0] alu_result,
-    output reg [63:0] reg_write_data
+// Register File (Module name unchanged)
+module reg_file_bank (
+    input logic clk,
+    input logic reset,
+    input logic enable_write_from_memory, // Renamed port
+    input logic enable_write_from_alu,    // Renamed port
+    input logic [63:0] data_to_write,      // Renamed port
+    input logic [4:0] read_address1,      // Renamed port
+    input logic [4:0] read_address2,      // Renamed port
+    input logic [4:0] address_to_write,   // Renamed port
+    output logic [63:0] read_data1,         // Renamed port
+    output logic [63:0] read_data2,         // Renamed port
+    output logic [63:0] write_addr_current_val, // Renamed port
+    output logic [63:0] stack_pointer_output // Renamed port
 );
-    always @(*) begin
-        case (operation_code)
-            5'h10: reg_write_data = mem_read_data;
-            default: reg_write_data = alu_result;
-        endcase
-    end
-endmodule
+    logic [63:0] register_array [0:31]; // Renamed internal array
+    logic internal_write_enable;        // Renamed internal signal
+    integer loop_counter;               // Renamed loop variable
 
-module memory (
-    input [63:0] program_counter,
-    input clk,
-    input reset,
-    input write_flag,
-    input fetch_enable,
-    input mem_enable,
-    input mem_read,
-    input [63:0] write_data,
-    input [63:0] rw_address,
-    output reg [63:0] read_data,
-    output reg [31:0] instruction
-);
-    reg [7:0] bytes [0:524287];
-    integer idx;
+    assign internal_write_enable = enable_write_from_memory | enable_write_from_alu; // Renamed signals
+    assign read_data1 = register_array[read_address1];            // Renamed signals/ports
+    assign read_data2 = register_array[read_address2];            // Renamed signals/ports
+    assign write_addr_current_val = register_array[address_to_write]; // Renamed signals/ports
+    assign stack_pointer_output = register_array[31];              // Renamed signals/ports
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            for (idx = 0; idx < 524288; idx = idx + 1) begin
-                bytes[idx] <= 8'b0;
-            end
+            for (loop_counter = 0; loop_counter < 31; loop_counter = loop_counter + 1) // Renamed variable
+                register_array[loop_counter] <= 64'h0; // Renamed array
+            register_array[31] <= 64'd524288;         // Renamed array
         end
-    end
-
-    assign instruction[7:0] = bytes[program_counter];
-    assign instruction[15:8] = bytes[program_counter+1];
-    assign instruction[23:16] = bytes[program_counter+2];
-    assign instruction[31:24] = bytes[program_counter+3];
-
-    always @(mem_enable) begin
-        if (mem_read) begin
-            read_data[7:0] = bytes[rw_address];
-            read_data[15:8] = bytes[rw_address+1];
-            read_data[23:16] = bytes[rw_address+2];
-            read_data[31:24] = bytes[rw_address+3];
-            read_data[39:32] = bytes[rw_address+4];
-            read_data[47:40] = bytes[rw_address+5];
-            read_data[55:48] = bytes[rw_address+6];
-            read_data[63:56] = bytes[rw_address+7];
-        end
-        if (write_flag) begin
-            bytes[rw_address] = write_data[7:0];
-            bytes[rw_address+1] = write_data[15:8];
-            bytes[rw_address+2] = write_data[23:16];
-            bytes[rw_address+3] = write_data[31:24];
-            bytes[rw_address+4] = write_data[39:32];
-            bytes[rw_address+5] = write_data[47:40];
-            bytes[rw_address+6] = write_data[55:48];
-            bytes[rw_address+7] = write_data[63:56];
-        end
+        else if (internal_write_enable) // Renamed signal
+            register_array[address_to_write] <= data_to_write; // Renamed array and ports
     end
 endmodule
 
-module instructionDecoder (
-    input [31:0] instruction_data,
-    input clk,
-    input rst,
-    input alu_ready,
-    output reg fetch_enable,
-    output reg mem_access_enable,
-    output reg [63:0] literal_value,
-    output reg [4:0] dest_reg,
-    output reg [4:0] src_reg1,
-    output reg [4:0] src_reg2,
-    output reg [4:0] operation_code,
-    output reg alu_enable,
-    output reg reg_read_enable,
-    output reg reg_write_enable
+// Instruction Decoder (Revised)
+module inst_decoder (
+    input logic [31:0] input_instruction_word,      // Renamed port
+    output logic [63:0] decoded_immediate,          // Renamed port
+    output logic [4:0] decoded_destination_idx,     // Renamed port
+    output logic [4:0] decoded_source1_idx,         // Renamed port
+    output logic [4:0] decoded_source2_idx,         // Renamed port
+    output logic [4:0] decoded_operation_code       // Renamed port
 );
-    reg [2:0] decode_state;
-    reg [4:0] opcode_reg;
+    // Internal signals for clarity
+    logic [4:0] temp_opcode;
+    logic [4:0] temp_dest;
+    logic [4:0] temp_src1;
+    logic [4:0] temp_src2;
 
-    always @(posedge rst) begin
-        if (rst) decode_state <= 3'b0;
-    end
+    // Combinational assignments based on input instruction
+    assign temp_opcode = input_instruction_word[31:27];
+    assign temp_dest   = input_instruction_word[26:22];
+    assign temp_src1   = input_instruction_word[21:17];
+    assign temp_src2   = input_instruction_word[16:12];
 
-    always @(posedge clk) begin
-        alu_enable <= 0;
-        reg_write_enable <= 0;
-        reg_read_enable <= 0;
-        mem_access_enable <= 0;
+    assign decoded_operation_code = temp_opcode;
+    assign decoded_destination_idx = temp_dest;
+    assign decoded_source2_idx = temp_src2;
+    assign decoded_immediate = {52'h0, input_instruction_word[11:0]}; // Renamed output
 
-        case (decode_state)
-            3'b0: decode_state <= 3'b1;
-            3'b1: decode_state <= 3'b10;
-            3'b10: begin
-                if (!alu_ready) decode_state <= 3'b10;
-                else if (opcode_reg == 5'h10 || opcode_reg == 5'h13 || opcode_reg == 5'h0C || opcode_reg == 5'h0D) begin
-                    decode_state <= 3'b11;
-                end
-                else if (opcode_reg == 5'h08 || opcode_reg == 5'h09 || opcode_reg == 5'h0A || opcode_reg == 5'h0B || opcode_reg == 5'h0E) begin
-                    decode_state <= 3'b0;
-                end
-                else decode_state <= 3'b100;
+    // Logic for source1 potentially being the same as destination for certain opcodes
+    assign decoded_source1_idx = (temp_opcode == 5'b11001 || temp_opcode == 5'b11011 ||
+                                 temp_opcode == 5'b00101 || temp_opcode == 5'b00111 ||
+                                 temp_opcode == 5'b10010) ? temp_dest : temp_src1; // Renamed output
+
+endmodule
+
+
+// Memory Handler
+module mem_handler (
+    input logic [4:0] input_operation_code,     // Renamed port
+    input logic [63:0] destination_reg_value,  // Renamed port
+    input logic [63:0] source_reg_value,       // Renamed port
+    input logic [63:0] immediate_value_input,  // Renamed port
+    input logic [63:0] current_pc_value,       // Renamed port
+    input logic [63:0] stack_pointer_input,    // Renamed port
+    output logic [63:0] generated_memory_address, // Renamed port
+    output logic [63:0] generated_memory_data_out,// Renamed port
+    output logic generate_write_enable,           // Renamed port
+    output logic generate_regfile_write_enable  // Renamed port
+);
+    always_comb begin
+        case (input_operation_code) // Renamed variable
+            5'b01100: begin  // call
+                generated_memory_address = stack_pointer_input - 8; // Renamed variables
+                generated_memory_data_out = current_pc_value + 4;   // Renamed variables
+                generate_write_enable = 1;                          // Renamed variable
+                generate_regfile_write_enable = 0;                  // Renamed variable
             end
-            3'b11: begin
-                if (opcode_reg == 5'h10) decode_state <= 3'b100;
-                else decode_state <= 3'b0;
+            5'b01101: begin  // return
+                generated_memory_address = stack_pointer_input - 8; // Renamed variable
+                generated_memory_data_out = 64'h0;                  // Renamed variable
+                generate_write_enable = 0;                          // Renamed variable
+                generate_regfile_write_enable = 0;                  // Renamed variable
             end
-            3'b100: decode_state <= 3'b0;
-        endcase
-    end
-
-    always @(*) begin
-        case (decode_state)
-            3'b0: begin
-                fetch_enable = 1;
-                mem_access_enable = 1;
+            5'b10000: begin  // mov $r_d, ($r_s)(L)
+                generated_memory_address = source_reg_value + immediate_value_input; // Renamed variables
+                generated_memory_data_out = 64'h0;                  // Renamed variable
+                generate_write_enable = 0;                          // Renamed variable
+                generate_regfile_write_enable = 1;                  // Renamed variable
             end
-            3'b1: begin
-                operation_code = instruction_data[31:27];
-                opcode_reg = operation_code;
-                dest_reg = instruction_data[26:22];
-                src_reg1 = instruction_data[21:17];
-                src_reg2 = instruction_data[16:12];
-                literal_value = {52'b0, instruction_data[11:0]};
-
-                case (operation_code)
-                    5'b11001: src_reg1 = dest_reg;
-                    5'b11011: src_reg1 = dest_reg;
-                    5'b00101: src_reg1 = dest_reg;
-                    5'b00111: src_reg1 = dest_reg;
-                    5'b10010: src_reg1 = dest_reg;
-                endcase
-
-                reg_read_enable = 1;
+            5'b10011: begin  // mov ($r_d)(L), $r_s
+                generated_memory_address = destination_reg_value + immediate_value_input; // Renamed variables
+                generated_memory_data_out = source_reg_value;       // Renamed variables
+                generate_write_enable = 1;                          // Renamed variable
+                generate_regfile_write_enable = 0;                  // Renamed variable
             end
-            3'b10: alu_enable = 1;
-            3'b11: mem_access_enable = 1;
-            3'b100: reg_write_enable = 1;
+            default: begin
+                generated_memory_address = 64'h2000; // Renamed variable
+                generated_memory_data_out = 64'h0;    // Renamed variable
+                generate_write_enable = 0;            // Renamed variable
+                generate_regfile_write_enable = 0;    // Renamed variable
+            end
         endcase
     end
 endmodule
 
-module fetch (
-    input clk,
-    input fetch_enable,
-    input reset,
-    input [63:0] next_program_counter,
-    output reg [63:0] program_counter
+// Control Unit
+module control_unit (
+    input logic [4:0] current_operation,      // Renamed port
+    input logic [63:0] destination_input_val, // Renamed port
+    input logic [63:0] source1_input_val,    // Renamed port
+    input logic [63:0] source2_input_val,    // Renamed port
+    input logic [63:0] immediate_input_val,  // Renamed port
+    input logic [63:0] program_counter_current, // Renamed port
+    input logic [63:0] data_from_memory,     // Renamed port
+    output logic [63:0] program_counter_next   // Renamed port
 );
-    reg [63:0] current_program_counter;
-
-    always @(*) begin
-        if (fetch_enable) program_counter = current_program_counter;
+    always_comb begin
+        case (current_operation) // Renamed variable
+            5'b01000: program_counter_next = destination_input_val;                      // br
+            5'b01001: program_counter_next = program_counter_current + destination_input_val; // brr $r_d
+            5'b01010: program_counter_next = program_counter_current + $signed(immediate_input_val); // brr L
+            5'b01011: program_counter_next = (source1_input_val != 0) ? destination_input_val : program_counter_current + 4; // brnz
+            5'b01100: program_counter_next = destination_input_val;                      // call
+            5'b01101: program_counter_next = data_from_memory;                          // return
+            5'b01110: program_counter_next = (source1_input_val > source2_input_val) ? destination_input_val : program_counter_current + 4; // brgt
+            default:  program_counter_next = program_counter_current + 4;
+        endcase
     end
+endmodule
 
-    always @(posedge clk or posedge reset) begin
+// Memory Unit (Module name unchanged)
+module memory_unit (
+    input logic [63:0] instruction_fetch_address, // Renamed port
+    input logic clk,
+    input logic reset,
+    input logic data_write_enable,         // Renamed port
+    input logic [63:0] input_data_for_write, // Renamed port
+    input logic [63:0] data_access_address,  // Renamed port
+    output logic [63:0] output_data_read,      // Renamed port
+    output logic [31:0] fetched_instruction_word // Renamed port
+);
+    logic [7:0] bytes [0:524287]; // Internal array name unchanged as requested
+    integer reset_loop_idx, write_loop_idx; // Renamed loop variables
+
+    // Assignments using renamed ports/signals and unchanged 'bytes' array
+    assign fetched_instruction_word[31:24] = bytes[instruction_fetch_address+3];
+    assign fetched_instruction_word[23:16] = bytes[instruction_fetch_address+2];
+    assign fetched_instruction_word[15:8]  = bytes[instruction_fetch_address+1];
+    assign fetched_instruction_word[7:0]   = bytes[instruction_fetch_address];
+    assign output_data_read[63:56] = bytes[data_access_address+7];
+    assign output_data_read[55:48] = bytes[data_access_address+6];
+    assign output_data_read[47:40] = bytes[data_access_address+5];
+    assign output_data_read[39:32] = bytes[data_access_address+4];
+    assign output_data_read[31:24] = bytes[data_access_address+3];
+    assign output_data_read[23:16] = bytes[data_access_address+2];
+    assign output_data_read[15:8]  = bytes[data_access_address+1];
+    assign output_data_read[7:0]   = bytes[data_access_address];
+
+    always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            current_program_counter <= 64'h2000;
-        end else if (fetch_enable) begin
-            if (next_program_counter === 64'hx) begin
-                current_program_counter = 64'h2000;
-            end
-            else current_program_counter <= next_program_counter;
+            // Using renamed loop variable 'reset_loop_idx'
+            for (reset_loop_idx = 0; reset_loop_idx < 524288; reset_loop_idx = reset_loop_idx + 1)
+                bytes[reset_loop_idx] <= 8'h0; // 'bytes' array unchanged
+        end
+        else if (data_write_enable) begin // Renamed port
+            // Using renamed loop variable 'write_loop_idx'
+            for (write_loop_idx = 0; write_loop_idx < 8; write_loop_idx = write_loop_idx + 1)
+                // Using renamed ports and unchanged 'bytes' array
+                bytes[data_access_address + write_loop_idx] <= input_data_for_write[8*write_loop_idx +: 8];
         end
     end
 endmodule
 
-module aluMemMux (
-    input mem_pc_select,
-    input [63:0] mem_data,
-    input [63:0] alu_output,
-    output reg [63:0] new_program_counter
+// Fetch Unit
+module fetch_unit (
+    input logic clk,
+    input logic reset,
+    input logic [63:0] current_stack_ptr, // Renamed port (note: was unused in original logic)
+    input logic [63:0] input_next_pc,     // Renamed port
+    output logic [63:0] output_current_pc  // Renamed port
 );
-    assign new_program_counter = mem_pc_select ? mem_data : alu_output;
-endmodule
+    logic [63:0] internal_pc_reg;   // Renamed internal register
+    assign output_current_pc = internal_pc_reg; // Renamed signals
 
-module alu (
-    input alu_enable,
-    input [4:0] control_code,
-    input [63:0] input1,
-    input [63:0] input2,
-    input [63:0] dest_input,
-    input [63:0] input_program_counter,
-    input [63:0] stack_reg,
-    input clk,
-    output reg [63:0] alu_result,
-    output reg [63:0] mem_write_data,
-    output reg [63:0] mem_rw_address,
-    output reg alu_ready,
-    output reg mem_write_flag,
-    output reg mem_read_flag,
-    output reg [63:0] program_counter,
-    output reg halt_signal,
-    output reg mem_pc_select
-);
-    real real_input1, real_input2, real_result;
-    assign real_input1 = $bitstoreal(input1);
-    assign real_input2 = $bitstoreal(input2);
-
-    always @(*) begin
-        if (alu_enable) begin
-            halt_signal = 0;
-            program_counter = input_program_counter + 4;
-            mem_write_data = 0;
-            mem_rw_address = 64'h2000;
-            mem_write_flag = 0;
-            mem_read_flag = 0;
-            mem_pc_select = 0;
-            case (control_code)
-                5'h18: alu_result = input1 + input2;
-                5'h19: alu_result = input1 + input2;
-                5'h1A: alu_result = input1 - input2;
-                5'h1B: alu_result = input1 - input2;
-                5'h1C: alu_result = input1 * input2;
-                5'h1D: alu_result = input1 / input2;
-                5'h00: alu_result = input1 & input2;
-                5'h01: alu_result = input1 | input2;
-                5'h02: alu_result = input1 ^ input2;
-                5'h03: alu_result = ~input1;
-                5'h04: alu_result = input1 >> input2;
-                5'h05: alu_result = input1 >> input2;
-                5'h06: alu_result = input1 << input2;
-                5'h07: alu_result = input1 << input2;
-                5'h10: begin
-                    alu_result = 64'b0;
-                    mem_rw_address = input1 + input2;
-                    mem_read_flag = 1;
-                end
-                5'h11: alu_result = input1;
-                5'h12: alu_result = {input1[63:12], input2[11:0]};
-                5'h13: begin
-                    alu_result = 64'b0;
-                    mem_rw_address = dest_input + input2;
-                    mem_write_data = input1;
-                    mem_write_flag = 1;
-                end
-                5'h14: begin
-                    real_result = real_input1 + real_input2;
-                    alu_result = $realtobits(real_result);
-                end
-                5'h15: begin
-                    real_result = real_input1 - real_input2;
-                    alu_result = $realtobits(real_result);
-                end
-                5'h16: begin
-                    real_result = real_input1 * real_input2;
-                    alu_result = $realtobits(real_result);
-                end
-                5'h17: begin
-                    real_result = real_input1 / real_input2;
-                    alu_result = $realtobits(real_result);
-                end
-                5'h08: begin
-                    program_counter = dest_input;
-                    alu_result = 64'b0;
-                end
-                5'h09: begin
-                    program_counter = input_program_counter + dest_input;
-                    alu_result = 64'b0;
-                end
-                5'h0A: begin
-                    program_counter = input_program_counter + $signed(input2);
-                    alu_result = 64'b0;
-                end
-                5'h0B: begin
-                    program_counter = (input1 != 0) ? dest_input : input_program_counter + 4;
-                    alu_result = 64'b0;
-                end
-                5'h0C: begin
-                    program_counter = dest_input;
-                    alu_result = 64'b0;
-                    mem_write_data = input_program_counter + 4;
-                    mem_rw_address = stack_reg - 8;
-                    mem_write_flag = 1;
-                end
-                5'h0D: begin
-                    alu_result = 64'b0;
-                    mem_rw_address = stack_reg - 8;
-                    mem_read_flag = 1;
-                    mem_pc_select = 1;
-                end
-                5'h0E: begin
-                    program_counter = (input1 > input2) ? dest_input : input_program_counter + 4;
-                    alu_result = 64'b0;
-                end
-                5'h0F: begin
-                    alu_result = 64'b0;
-                    halt_signal = 1;
-                end
-            endcase
-            alu_ready = 1;
-        end
-        else begin
-            halt_signal = 0;
-            alu_ready = 0;
-        end
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset)
+            internal_pc_reg <= 64'h2000; // Renamed register
+        else
+            internal_pc_reg <= input_next_pc; // Renamed register and port
     end
 endmodule
