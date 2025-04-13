@@ -109,7 +109,7 @@ module alu_unit (
     assign float_operand1 = $bitstoreal(input_operand1);
     assign float_operand2 = $bitstoreal(input_operand2);
 
-    always_comb begin
+    always@ (*) begin
         output_valid_signal = 1;
         case (alu_control_signal) // Renamed variable
             5'b11000: result_output = input_operand1 + input_operand2;         // add
@@ -159,7 +159,7 @@ module reg_lit_mux (
     input logic [63:0] literal_input_value,  // Renamed port
     output logic [63:0] mux_output_value     // Renamed port
 );
-    always_comb begin
+    always@ (*) begin
         // Using renamed port 'select_operation'
         if (select_operation == 5'b11001 || select_operation == 5'b11011 || select_operation == 5'b00101 ||
             select_operation == 5'b00111 || select_operation == 5'b10010)
@@ -252,7 +252,7 @@ module mem_handler (
     output logic generate_write_enable,           // Renamed port
     output logic generate_regfile_write_enable  // Renamed port
 );
-    always_comb begin
+    always@ (*) begin
         case (input_operation_code) // Renamed variable
             5'b01100: begin  // call
                 generated_memory_address = stack_pointer_input - 8; // Renamed variables
@@ -299,7 +299,7 @@ module control_unit (
     input logic [63:0] data_from_memory,     // Renamed port
     output logic [63:0] program_counter_next   // Renamed port
 );
-    always_comb begin
+    always@ (*) begin
         case (current_operation) // Renamed variable
             5'b01000: program_counter_next = destination_input_val;                      // br
             5'b01001: program_counter_next = program_counter_current + destination_input_val; // brr $r_d
@@ -341,7 +341,7 @@ module memory_unit (
     assign output_data_read[15:8]  = bytes[data_access_address+1];
     assign output_data_read[7:0]   = bytes[data_access_address];
 
-    always_ff @(posedge clk or posedge reset) begin
+    always @(posedge clk or posedge reset) begin
         if (reset) begin
             // Using renamed loop variable 'reset_loop_idx'
             for (reset_loop_idx = 0; reset_loop_idx < 524288; reset_loop_idx = reset_loop_idx + 1)
@@ -367,7 +367,7 @@ module fetch_unit (
     logic [63:0] internal_pc_reg;   // Renamed internal register
     assign output_current_pc = internal_pc_reg; // Renamed signals
 
-    always_ff @(posedge clk or posedge reset) begin
+    always @(posedge clk or posedge reset) begin
         if (reset)
             internal_pc_reg <= 64'h2000; // Renamed register
         else
