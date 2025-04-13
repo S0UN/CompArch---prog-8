@@ -86,7 +86,7 @@ module tinker_core (
         .newPc(next_pc)
     );
 
-    memory memory(
+    memory mem_unit(
         .pc(pc),
         .clk(clk),
         .reset(reset),
@@ -134,60 +134,99 @@ module instructionDecoder(
         WRITE_BACK = 3'b100
     } decode_state_t;
 
-    decode_state_t current_state, next_state;
-    reg [4:0] opcode_latch;
+    decode_state_t state;
+    reg [4:0] opcode_reg;
 
+    // Reset and state transitions
     always @(posedge clk or posedge rst) begin
         if (rst) begin
-            current_state <= FETCH;
+            state <= FETCH;
+            aluEnable <= 0;
+            regWriteEnable <= 0;
+            regReadEnable <= 0;
+            memEnable <= 0;
+            fetchEnable <= 0;
         end else begin
-            current_state <= next_state;
-        end
-    end
+            // Clear control signals at the start of each cycle
+            aluEnable <= 0;
+            regWriteEnable <= 0;
+            regReadEnable <= 0;
+            memEnable <= 0;
+            fetchEnable <= 0;
 
-    always @(*) begin
-        next_state = current_state;
-        case (current_state)
-            FETCH: next_state = DECODE;
-            DECODE: next_state = EXECUTE;
-            EXECUTE: begin
-                if (!aluReady) next_state = EXECUTE;
-                else if (opcode_latch == 5'h10 || opcode_latch == 5'h13 || opcode_latch == 5'h0C || opcode_latch == 5'h0D) begin
-                    next_state = MEMORY_ACCESS;
-                end else if (opcode_latch == 5'h08 || opcode_latch == 5'h09 || opcode_latch == 5'h0A || opcode_latch == 5'h0B || opcode_latch == 5'h0E) begin
-                    next_state = FETCH;
-                end else begin
-                    next_state = WRITE_BACK;
+            case (state)
+                FETCH: begin
+                    state <= DECODE;
                 end
-            end
-            MEMORY_ACCESS: begin
-                if (opcode_latch == 5'h10) next_state = WRITE_BACK;
-                else next_state = FETCH;
-            end
-            WRITE_BACK: next_state = FETCH;
-        endcase
-    end
-
-    always @(posedge clk) begin
-        if (current_state == DECODE) begin
-            opcode <= instructionLine[31:27];
-            opcode_latch <= instructionLine[31:27];
-            rd <= instructionLine[26:22];
-            rs <= instructionLine[21:17];
-            rt <= instructionLine[16:12];
-            literal <= {52'b0, instructionLine[11:0]};
-            case (instructionLine[31:27])
-                5'b11001, 5'b11011, 5'b00101, 5'b00111, 5'b10010: rs <= instructionLine[26:22];
+                DECODE: begin
+                    state <= EXECUTE;
+                end
+                EXECUTE: begin
+                    if (!aluReady) begin
+                        state <= EXECUTE;
+                    end else if (opcode_reg == 5'h10 || opcode_reg == 5'h13 || opcode_reg == 5'h0C || opcode_reg == 5'h0D) begin
+                        state <= MEMORY_ACCESS;
+                    end else if (opcode_reg == 5'h08 || opcode_reg == 5'h09 || opcode_reg == 5'h0A || opcode_reg == 5'h0B || opcode_reg == 5'h0E) begin
+                        state <= FETCH;
+                    end else begin
+                        state <= WRITE_BACK;
+                    end
+                end
+                MEMORY_ACCESS: begin
+                    if (opcode_reg == 5'h10) begin
+                        state <= WRITE_BACK;
+                    end else begin
+                        state <= FETCH;
+                    end
+                end
+                WRITE_BACK: begin
+                    state <= FETCH;
+                end
+                default: begin
+                    state <= FETCH;
+                end
             endcase
         end
     end
 
+    // Control signals and instruction decoding
     always @(*) begin
-        fetchEnable = (current_state == FETCH);
-        memEnable = (current_state == FETCH || current_state == MEMORY_ACCESS);
-        aluEnable = (current_state == EXECUTE);
-        regReadEnable = (current_state == DECODE);
-        regWriteEnable = (current_state == WRITE_BACK);
+        case (state)
+            FETCH: begin
+                fetchEnable = 1;
+                memEnable = 1;
+            end
+            DECODE: begin
+                opcode = instructionLine[31:27];
+                opcode_reg = instructionLine[31:27];
+                rd = instructionLine[26:22];
+                rs = instructionLine[21:17];
+                rt = instructionLine[16:12];
+                literal = {52'b0, instructionLine[11:0]};
+                case (instructionLine[31:27])
+                    5'b11001, 5'b11011, 5'b00101, 5'b00111, 5'b10010: begin
+                        rs = instructionLine[26:22];
+                    end
+                endcase
+                regReadEnable = 1;
+            end
+            EXECUTE: begin
+                aluEnable = 1;
+            end
+            MEMORY_ACCESS: begin
+                memEnable = 1;
+            end
+            WRITE_BACK: begin
+                regWriteEnable = 1;
+            end
+            default: begin
+                fetchEnable = 0;
+                memEnable = 0;
+                regReadEnable = 0;
+                aluEnable = 0;
+                regWriteEnable = 0;
+            end
+        endcase
     end
 
 endmodule
@@ -355,12 +394,19 @@ module registerFile (
         registers[31] <= 64'd524288;
     end
 
-    always @(posedge clk) begin
-        if (regWriteEnable) begin
+    // Synchronous writes
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            for (i = 0; i < 31; i = i + 1) begin
+                registers[i] <= 64'b0;
+            end
+            registers[31] <= 64'd524288;
+        end else if (regWriteEnable) begin
             registers[write] <= data;
         end
     end
 
+    // Combinational reads
     always @(*) begin
         if (regReadEnable) begin
             output1 = registers[read1];
@@ -373,6 +419,7 @@ module registerFile (
         end
         stackPtr = registers[31];
     end
+
 endmodule
 
 module memRegMux(
@@ -451,13 +498,29 @@ module fetch(
     input [63:0] next_pc,
     output reg [63:0] pc
 );
+
+    reg [63:0] current_pc;
+
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            pc <= 64'h2000;
+            current_pc <= 64'h2000;
         end else if (fetchEnable) begin
-            pc <= next_pc;
+            if (next_pc === 64'hx) begin
+                current_pc <= 64'h2000;
+            end else begin
+                current_pc <= next_pc;
+            end
         end
     end
+
+    always @(*) begin
+        if (fetchEnable) begin
+            pc = current_pc;
+        end else begin
+            pc = 64'h2000;
+        end
+    end
+
 endmodule
 
 module aluMemMux(
