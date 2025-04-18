@@ -1,6 +1,7 @@
 //############################################################################
 //## tinker_core (Top Level Module)
 //## CHANGED: Added Forwarding Logic
+//## NOTE: Does not include Load-Use Hazard Stall Logic
 //############################################################################
 module tinker_core (
     input clk,
@@ -88,7 +89,8 @@ module tinker_core (
         .pc_out(pc_if)
     );
 
-    memory memory ( // Renamed instance for clarity
+    // Using original instance name "memory" as requested
+    memory memory (
         .clk(clk),
         .reset(reset),
         .inst_addr(pc_if),
@@ -418,15 +420,14 @@ module forwardingMux (
             2'b00: forwarded_data = data_regfile; // Select Register File data
             2'b01: forwarded_data = data_ex;      // Select EX stage data
             2'b10: forwarded_data = data_mem;     // Select MEM/WB stage data
-            default: forwarded_data = data_regfile; // Default to RegFile data
+            default: forwarded_data = data_regfile; // Default to RegFile data (safer default)
         endcase
     end
 
 endmodule
 
 //############################################################################
-//## registerFile (No changes needed based on request)
-//## Reads committed state only, forwarding happens outside.
+//## registerFile (No changes)
 //############################################################################
 module registerFile (
     input clk,
