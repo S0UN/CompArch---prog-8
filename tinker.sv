@@ -88,7 +88,7 @@ module tinker_core (
         .pc_out(pc_if)
     );
 
-    memory memory_inst ( // Renamed instance for clarity
+    memory memory ( // Renamed instance for clarity
         .clk(clk),
         .reset(reset),
         .inst_addr(pc_if),
