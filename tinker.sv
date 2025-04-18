@@ -88,7 +88,7 @@ module tinker_core (
         .pc_out(pc_if)
     );
 
-    memory memory ( // Renamed instance for clarity
+    memory memory_inst ( // Renamed instance for clarity
         .clk(clk),
         .reset(reset),
         .inst_addr(pc_if),
@@ -366,11 +366,7 @@ module forwardingUnit (
         // MEM Hazard Check for A: Forward from MEM if MEM writes to a non-zero register
         // matching rs_addr_de, AND no EX hazard exists for the same register
         else if (reg_write_mem && (rd_addr_mem != 5'b0) && (rd_addr_mem == rs_addr_de)) begin
-             // Check for double hazard: Only forward from MEM if EX isn't already writing to rs_addr_de
-             // This check isn't strictly necessary if EX hazard takes priority, but makes it explicit.
-            // if (!(reg_write_ex && (rd_addr_ex != 5'b0) && (rd_addr_ex == rs_addr_de))) begin
-                 forward_a_select = 2'b10; // Forward MEM result (Writeback data)
-            // end
+             forward_a_select = 2'b10; // Forward MEM result (Writeback data)
         end
 
         // --- Forwarding Logic for Operand B (rt_addr_de) ---
@@ -383,9 +379,7 @@ module forwardingUnit (
         // MEM Hazard Check for B: Forward from MEM if MEM writes to a non-zero register
         // matching rt_addr_de, AND no EX hazard exists for the same register
         else if (reg_write_mem && (rd_addr_mem != 5'b0) && (rd_addr_mem == rt_addr_de)) begin
-            // if (!(reg_write_ex && (rd_addr_ex != 5'b0) && (rd_addr_ex == rt_addr_de))) begin
-                 forward_b_select = 2'b10; // Forward MEM result
-            // end
+            forward_b_select = 2'b10; // Forward MEM result
         end
 
         // --- Forwarding Logic for Operand C (rd_addr_de - used as source) ---
@@ -400,9 +394,7 @@ module forwardingUnit (
         // MEM Hazard Check for C: Forward from MEM if MEM writes to a non-zero register
         // matching rd_addr_de, AND no EX hazard exists for the same register
         else if (reg_write_mem && (rd_addr_mem != 5'b0) && (rd_addr_mem == rd_addr_de)) begin
-           // if (!(reg_write_ex && (rd_addr_ex != 5'b0) && (rd_addr_ex == rd_addr_de))) begin
-                 forward_c_select = 2'b10; // Forward MEM result
-           // end
+           forward_c_select = 2'b10; // Forward MEM result
         end
     end
 
@@ -479,7 +471,6 @@ module registerFile (
     // Synchronous Write Port
     always @(posedge clk) begin
         if (!reset && write_enable) begin // R0 is writable as requested
-            // Check if write_addr is non-zero? NO - User wants R0 writable. Forwarding unit handles R0 hazard prevention.
             registers[write_addr] <= write_data;
         end
     end
@@ -592,18 +583,11 @@ module instructionDecoder (
                   end
             default: ; // NOP or undefined
         endcase
-
-       // Handle instructions where rs is implicitly rd (I-types)
-       // Moved inside the case statement for ADDI etc. for clarity
-       // case (opcode)
-       //     ADDI, SUBI, SHFTRI, SHFTLI, MOV_LIT: rs = rd;
-       //     default: ;
-       // endcase
     end
 endmodule
 
 //############################################################################
-//## de_ex_register (No changes needed - already passed operands A, B, C)
+//## de_ex_register (No changes)
 //############################################################################
 module de_ex_register (
     input clk,
@@ -663,7 +647,8 @@ module de_ex_register (
 endmodule
 
 //############################################################################
-//## alu (No changes needed - uses potentially forwarded inputs)
+//## alu
+//## CHANGED: Restored original MOV_LIT behavior
 //############################################################################
 module alu (
     // Control Inputs
@@ -729,7 +714,8 @@ module alu (
                 // Data Movement - Calculate address or pass data
                 MOV_MEM: mem_addr = input1 + $signed(input2); // Load: Addr = rs + L
                 MOV_REG: result = input1;                   // Move Register: Result = rs
-                MOV_LIT: result = input2;                   // Move Literal: Result = L (Decoder handles rs=rd alias)
+                // *** RESTORED ORIGINAL MOV_LIT LOGIC ***
+                MOV_LIT: result = {input1[63:12], input2[11:0]}; // Combine upper bits of rd (input1) with literal (input2[11:0])
                 MOV_STR: begin                              // Store: Addr = rd + L, Data = rs
                            mem_addr = input3 + $signed(literal); // Base address from input3 (rd)
                            mem_wdata = input1;                  // Data to store from input1 (rs)
@@ -739,27 +725,27 @@ module alu (
                 ADDF, SUBF, MULF, DIVF: result = 64'b0; // Placeholder
 
                 // Control Flow - Branches (Calculate target PC and taken condition)
-                BR: begin branch_pc = input3; branch_taken = 1'b1; end // Target is rd_data (input3) [cite: 32]
-                BRR: begin branch_pc = pc_in + $signed(input3); branch_taken = 1'b1; end // Target is PC + rd_data (input3) [cite: 34]
-                BRRI: begin branch_pc = pc_in + $signed(input2); branch_taken = 1'b1; end // Target is PC + literal (input2) [cite: 36]
-                BRNZ: begin if ($signed(input1) != 0) begin branch_pc = input3; branch_taken = 1'b1; end else branch_taken = 1'b0; end // Target rd_data (input3) if rs_data (input1) != 0 [cite: 39]
-                BRGT: begin if ($signed(input1) > $signed(input2)) begin branch_pc = input3; branch_taken = 1'b1; end else branch_taken = 1'b0; end // Target rd_data (input3) if rs_data (input1) > rt_data (input2) [cite: 47]
+                BR: begin branch_pc = input3; branch_taken = 1'b1; end // Target is rd_data (input3)
+                BRR: begin branch_pc = pc_in + $signed(input3); branch_taken = 1'b1; end // Target is PC + rd_data (input3)
+                BRRI: begin branch_pc = pc_in + $signed(input2); branch_taken = 1'b1; end // Target is PC + literal (input2)
+                BRNZ: begin if ($signed(input1) != 0) begin branch_pc = input3; branch_taken = 1'b1; end else branch_taken = 1'b0; end // Target rd_data (input3) if rs_data (input1) != 0
+                BRGT: begin if ($signed(input1) > $signed(input2)) begin branch_pc = input3; branch_taken = 1'b1; end else branch_taken = 1'b0; end // Target rd_data (input3) if rs_data (input1) > rt_data (input2)
 
                 // Control Flow - Subroutines
                 CALL: begin
-                          branch_pc = input3;               // Target is rd_data (input3) [cite: 42]
+                          branch_pc = input3;               // Target is rd_data (input3)
                           mem_addr = stack_ptr - 8;         // Stack address
                           mem_wdata = pc_in + 4;            // Return address
                           branch_taken = 1'b1;              // Always taken
                       end
                 RETURN: begin
-                           mem_addr = stack_ptr - 8;         // Stack address to read PC from [cite: 45]
+                           mem_addr = stack_ptr - 8;         // Stack address to read PC from
                            branch_taken = 1'b1;              // Set taken for flush, actual PC comes from mem
                            // branch_pc is ignored by fetch stage due to mem_pc signal
                        end
 
                 // Privileged - Halt
-                PRIV: if (literal[11:0] == 12'h0) hlt_out = 1'b1; // HALT [cite: 51, 52]
+                PRIV: if (literal[11:0] == 12'h0) hlt_out = 1'b1; // HALT
                       // Other PRIV codes would be handled here if implemented
 
                 default: result = 64'b0; // Default case
@@ -769,8 +755,7 @@ module alu (
 endmodule
 
 //############################################################################
-//## ex_mem_register (No changes needed - already passes necessary signals)
-//## Flush logic already present
+//## ex_mem_register (No changes)
 //############################################################################
 module ex_mem_register (
     input clk,
@@ -866,12 +851,9 @@ module memory (
         for (i = 0; i < MEM_SIZE_BYTES; i = i + 1) begin
             bytes[i] = 8'b0;
         end
-        // Example: Preload some instructions or data if needed for testing
-        // bytes[64'h2000] = ...;
     end
 
     // Combinational Instruction Read (Byte addressing, Little Endian assumed)
-    // Ensure address is within bounds (optional, depends on synthesis target)
     wire [ADDR_BITS-1:0] safe_inst_addr = inst_addr[$left(inst_addr) - 1 : 0]; // Adjust based on ADDR_BITS if needed
     assign instruction_out[7:0]   = bytes[safe_inst_addr + 0];
     assign instruction_out[15:8]  = bytes[safe_inst_addr + 1];
