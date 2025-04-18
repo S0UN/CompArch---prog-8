@@ -367,38 +367,107 @@ endmodule
 
 //############################################################################
 //## instructionDecoder
+//## CHANGED: Replaced SV assignment patterns with individual assignments for compatibility
 //############################################################################
 module instructionDecoder (
-    input [31:0] instructionLine, output reg [63:0] literal, output reg [4:0] rd,
-    output reg [4:0] rs, output reg [4:0] rt, output reg [4:0] opcode, output reg alu_enable,
-    output reg mem_read, output reg mem_write, output reg reg_write, output reg mem_to_reg,
-    output reg branch_taken, output reg mem_pc
+    input [31:0] instructionLine,
+    output reg [63:0] literal,
+    output reg [4:0] rd,
+    output reg [4:0] rs,
+    output reg [4:0] rt,
+    output reg [4:0] opcode,
+    // Control Signals
+    output reg alu_enable,
+    output reg mem_read,
+    output reg mem_write,
+    output reg reg_write,
+    output reg mem_to_reg,
+    output reg branch_taken, // Indicates branch *type*
+    output reg mem_pc
 );
-    localparam AND=0, OR=1, XOR=2, NOT=3, SHFTR=4, SHFTRI=5, SHFTL=6, SHFTLI=7, BR=8, BRR=9, BRRI=10, BRNZ=11,
-               CALL=12, RETURN=13, BRGT=14, PRIV=15, MOV_MEM=16, MOV_REG=17, MOV_LIT=18, MOV_STR=19,
-               ADDF=20, SUBF=21, MULF=22, DIVF=23, ADD=24, ADDI=25, SUB=26, SUBI=27, MUL=28, DIV=29;
-    always @(*) begin
-        opcode = instructionLine[31:27]; rd = instructionLine[26:22]; rs = instructionLine[21:17]; rt = instructionLine[16:12];
+    // Opcodes
+    localparam AND=5'h0, OR=5'h1, XOR=5'h2, NOT=5'h3, SHFTR=5'h4, SHFTRI=5'h5, SHFTL=5'h6, SHFTLI=5'h7,
+               BR=5'h8, BRR=5'h9, BRRI=5'hA, BRNZ=5'hB, CALL=5'hC, RETURN=5'hD, BRGT=5'hE, PRIV=5'hF,
+               MOV_MEM=5'h10, MOV_REG=5'h11, MOV_LIT=5'h12, MOV_STR=5'h13, ADDF=5'h14, SUBF=5'h15,
+               MULF=5'h16, DIVF=5'h17, ADD=5'h18, ADDI=5'h19, SUB=5'h1A, SUBI=5'h1B, MUL=5'h1C, DIV=5'h1D;
+
+    always @(*) begin // Using @(*) as requested previously
+        // Field extraction
+        opcode = instructionLine[31:27];
+        rd = instructionLine[26:22];
+        rs = instructionLine[21:17];
+        rt = instructionLine[16:12];
         literal = {{52{1'b0}}, instructionLine[11:0]}; // Zero-extend
-        alu_enable=0; mem_read=0; mem_write=0; reg_write=0; mem_to_reg=0; branch_taken=0; mem_pc=0;
+
+        // Default control signal values
+        alu_enable = 1'b0;
+        mem_read = 1'b0;
+        mem_write = 1'b0;
+        reg_write = 1'b0;
+        mem_to_reg = 1'b0;
+        branch_taken = 1'b0;
+        mem_pc = 1'b0;
+
+        // Decode based on opcode - using individual assignments now
         case (opcode)
-            ADD,SUB,MUL,DIV,AND,OR,XOR,NOT,SHFTR,SHFTL: {alu_enable,reg_write,mem_to_reg}='{1,1,0};
-            ADDI,SUBI,SHFTRI,SHFTLI: {alu_enable,reg_write,mem_to_reg}='{1,1,0};
-            MOV_MEM: {alu_enable,mem_read,reg_write,mem_to_reg}='{1,1,1,1};
-            MOV_STR: {alu_enable,mem_write,reg_write}='{1,1,0};
-            MOV_REG: {alu_enable,reg_write,mem_to_reg}='{1,1,0};
-            MOV_LIT: {alu_enable,reg_write,mem_to_reg}='{1,1,0};
-            ADDF,SUBF,MULF,DIVF: {alu_enable,reg_write,mem_to_reg}='{1,1,0};
-            BR,BRR,BRRI,BRNZ,BRGT: {alu_enable,reg_write,branch_taken}='{1,0,1};
-            CALL: {alu_enable,mem_write,reg_write,branch_taken}='{1,1,0,1};
-            RETURN: {alu_enable,mem_read,reg_write,mem_pc,branch_taken}='{1,1,0,1,1};
-            PRIV: if(literal[11:0]==0) {alu_enable,reg_write}='{1,0}; else alu_enable=0;
+            // R-Type Arithmetic/Logic/Shift
+            ADD, SUB, MUL, DIV, AND, OR, XOR, NOT, SHFTR, SHFTL: begin
+                alu_enable = 1'b1; reg_write = 1'b1; mem_to_reg = 1'b0;
+            end
+            // I-Type Arithmetic/Logic/Shift
+            ADDI, SUBI, SHFTRI, SHFTLI: begin
+                alu_enable = 1'b1; reg_write = 1'b1; mem_to_reg = 1'b0;
+            end
+            // Load
+            MOV_MEM: begin
+                alu_enable = 1'b1; mem_read = 1'b1; reg_write = 1'b1; mem_to_reg = 1'b1;
+            end
+            // Store
+            MOV_STR: begin
+                alu_enable = 1'b1; mem_write = 1'b1; reg_write = 1'b0;
+            end
+            // Register Moves
+            MOV_REG: begin
+                alu_enable = 1'b1; reg_write = 1'b1; mem_to_reg = 1'b0;
+            end
+            // Literal Move
+            MOV_LIT: begin
+                alu_enable = 1'b1; reg_write = 1'b1; mem_to_reg = 1'b0;
+            end
+            // Floating Point
+            ADDF, SUBF, MULF, DIVF: begin
+                alu_enable = 1'b1; reg_write = 1'b1; mem_to_reg = 1'b0;
+            end
+            // Control Flow - Branches
+            BR, BRR, BRRI, BRNZ, BRGT: begin
+                alu_enable = 1'b1; reg_write = 1'b0; branch_taken = 1'b1;
+            end
+            // Control Flow - Call
+            CALL: begin
+                alu_enable = 1'b1; mem_write = 1'b1; reg_write = 1'b0; branch_taken = 1'b1;
+            end
+            // Control Flow - Return
+            RETURN: begin
+                alu_enable = 1'b1; mem_read = 1'b1; reg_write = 1'b0; mem_pc = 1'b1; branch_taken = 1'b1;
+            end
+            // Privileged (HALT)
+            PRIV: begin
+                if (literal[11:0] == 12'h0) begin // L=0 for HALT
+                    alu_enable = 1'b1; reg_write = 1'b0;
+                end else begin
+                    alu_enable = 1'b0; // Treat others as NOP/illegal
+                end
+            end
+            default: ; // Default NOP (all signals 0 from defaults above)
+        endcase
+
+        // Adjust rs source for certain I-types AFTER control signals are set
+        case (opcode)
+            ADDI, SUBI, SHFTRI, SHFTLI, MOV_LIT: rs = rd;
             default: ;
         endcase
-        case (opcode) ADDI,SUBI,SHFTRI,SHFTLI,MOV_LIT: rs=rd; default: ; endcase
     end
 endmodule
-
 //############################################################################
 //## de_ex_register
 //############################################################################
