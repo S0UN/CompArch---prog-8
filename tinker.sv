@@ -267,7 +267,7 @@ endmodule
 
 //############################################################################
 //## registerFile
-//## CHANGED: Added 3rd read port, removed R0 write protect
+//## CHANGED: Removed internal read forwarding attempt for simplicity
 //############################################################################
 module registerFile (
     input clk,
@@ -282,7 +282,7 @@ module registerFile (
     // Read Port 2 (rt)
     input [4:0] read_addr2,
     output logic [63:0] read_data2,
-    // ADDED: Read Port 3 (rd - needed for store base, branch target)
+    // Read Port 3 (rd)
     input [4:0] read_addr3,
     output logic [63:0] read_data3,
     // Stack Pointer Output
@@ -299,27 +299,23 @@ module registerFile (
     end
 
     // Combinational Read Port 1 (rs)
-    assign read_data1 = (read_addr1 == 5'd31) ? registers[31] :
-                       (read_addr1 == write_addr && write_enable) ? write_data : // Minimal forwarding
-                       registers[read_addr1];
+    // CHANGED: Simplified read - reads committed state only
+    assign read_data1 = (read_addr1 == 5'd31) ? registers[31] : registers[read_addr1];
 
     // Combinational Read Port 2 (rt)
-    assign read_data2 = (read_addr2 == 5'd31) ? registers[31] :
-                       (read_addr2 == write_addr && write_enable) ? write_data : // Minimal forwarding
-                       registers[read_addr2];
+    // CHANGED: Simplified read - reads committed state only
+    assign read_data2 = (read_addr2 == 5'd31) ? registers[31] : registers[read_addr2];
 
-    // ADDED: Combinational Read Port 3 (rd)
-    assign read_data3 = (read_addr3 == 5'd31) ? registers[31] :
-                       (read_addr3 == write_addr && write_enable) ? write_data : // Minimal forwarding
-                       registers[read_addr3];
+    // Combinational Read Port 3 (rd)
+    // CHANGED: Simplified read - reads committed state only
+    assign read_data3 = (read_addr3 == 5'd31) ? registers[31] : registers[read_addr3];
 
     // Stack Pointer Output
     assign stack_ptr_out = registers[31];
 
     // Synchronous Write Port
     always @(posedge clk) begin
-        // R0 IS writable now
-        if (!reset && write_enable) begin
+        if (!reset && write_enable) begin // R0 is writable
             registers[write_addr] <= write_data;
         end
     end
