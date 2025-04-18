@@ -489,12 +489,13 @@ endmodule
 
 //############################################################################
 //## alu
-//## CHANGED: Added input3 (rd_data), corrected logic for MOV_STR, BR, BRNZ, BRGT, CALL
-//## CHANGED: Using always @(*)
+//## CHANGED: Set branch_taken = 1 for RETURN to ensure flush
 //############################################################################
 module alu (
+    // Control Inputs
     input logic alu_enable,
     input logic [4:0] opcode,
+    // Data Inputs
     input logic [63:0] input1,    // Pipelined rs_data (or rd_data for I-types)
     input logic [63:0] input2,    // Pipelined rt_data or literal
     input logic [63:0] input3,    // Pipelined rd_data
@@ -502,14 +503,21 @@ module alu (
     input logic [63:0] literal,   // Pipelined literal value
     input logic [63:0] pc_in,     // Pipelined PC value
     input logic [63:0] stack_ptr, // Pipelined R31 value
+    // Outputs
     output logic [63:0] result,
     output logic [63:0] mem_addr,
     output logic [63:0] mem_wdata,
     output logic [63:0] branch_pc,
     output logic branch_taken,
     output logic hlt_out,
-    input logic mem_read_in, mem_write_in, reg_write_in, mem_to_reg_in, mem_pc_in // Control inputs
+    // Control Signal Inputs
+    input logic mem_read_in,
+    input logic mem_write_in,
+    input logic reg_write_in,
+    input logic mem_to_reg_in,
+    input logic mem_pc_in
 );
+
     // Opcodes
     localparam AND = 5'h00, OR = 5'h01, XOR = 5'h02, NOT = 5'h03, SHFTR = 5'h04, SHFTRI = 5'h05,
                SHFTL = 5'h06, SHFTLI = 5'h07, BR = 5'h08, BRR = 5'h09, BRRI = 5'h0A, BRNZ = 5'h0B,
@@ -520,33 +528,43 @@ module alu (
     logic [63:0] fp_result; // For simulation only
 
     always @(*) begin // Using @(*) as requested
-        result = 64'b0; mem_addr = 64'b0; mem_wdata = 64'b0;
-        branch_pc = pc_in + 4; branch_taken = 1'b0; hlt_out = 1'b0;
+        // Default Output Values
+        result = 64'b0;
+        mem_addr = 64'b0;
+        mem_wdata = 64'b0;
+        branch_pc = pc_in + 4; // Default next PC
+        branch_taken = 1'b0; // Default: branch not taken
+        hlt_out = 1'b0;
 
         if (alu_enable) begin
             case (opcode)
+                // ... other cases ...
                 ADD, ADDI: result = $signed(input1) + $signed(input2);
                 SUB, SUBI: result = $signed(input1) - $signed(input2);
                 MUL: result = $signed(input1) * $signed(input2);
-                DIV: if (input2 != 0) result = $signed(input1) / $signed(input2); else result = 64'b0; // Basic div by zero check
+                DIV: if (input2 != 0) result = $signed(input1) / $signed(input2); else result = 64'b0;
                 AND: result = input1 & input2;
                 OR:  result = input1 | input2;
                 XOR: result = input1 ^ input2;
                 NOT: result = ~input1;
                 SHFTR, SHFTRI: result = input1 >> input2[5:0];
                 SHFTL, SHFTLI: result = input1 << input2[5:0];
-                MOV_MEM: mem_addr = input1 + $signed(input2); // rs + L
-                MOV_REG: result = input1; // Pass rs
-                MOV_LIT: result = {input1[63:12], input2[11:0]}; // Load literal low
-                MOV_STR: begin mem_addr=input3+$signed(literal); mem_wdata=input1; end // rd_data + L <- rs_data
-                ADDF, SUBF, MULF, DIVF: result = 64'b0; // FP ops Skipped
-                BR: begin branch_pc = input3; branch_taken = 1'b1; end // Target is rd_data
-                BRR: begin branch_pc = pc_in + $signed(input1); branch_taken = 1'b1; end // Target is PC + rs_data
-                BRRI: begin branch_pc = pc_in + $signed(input2); branch_taken = 1'b1; end // Target is PC + literal
-                BRNZ: begin if ($signed(input1)!=0) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end // Target rd_data if rs_data!=0
-                BRGT: begin if ($signed(input1)>$signed(input2)) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end // Target rd_data if rs_data>rt_data
-                CALL: begin branch_pc=input3; mem_addr=stack_ptr-8; mem_wdata=pc_in+4; branch_taken=1'b1; end // Target rd_data
-                RETURN: begin mem_addr=stack_ptr-8; branch_taken=1'b0; end // Read from stack; fetch handles PC update
+                MOV_MEM: mem_addr = input1 + $signed(input2);
+                MOV_REG: result = input1;
+                MOV_LIT: result = {input1[63:12], input2[11:0]};
+                MOV_STR: begin mem_addr=input3+$signed(literal); mem_wdata=input1; end
+                ADDF, SUBF, MULF, DIVF: result = 64'b0;
+                BR: begin branch_pc = input3; branch_taken = 1'b1; end
+                BRR: begin branch_pc = pc_in + $signed(input1); branch_taken = 1'b1; end
+                BRRI: begin branch_pc = pc_in + $signed(input2); branch_taken = 1'b1; end
+                BRNZ: begin if ($signed(input1)!=0) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end
+                BRGT: begin if ($signed(input1)>$signed(input2)) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end
+                CALL: begin branch_pc=input3; mem_addr=stack_ptr-8; mem_wdata=pc_in+4; branch_taken=1'b1; end
+                RETURN: begin
+                    mem_addr = stack_ptr - 8; // Address to read return PC from
+                    branch_taken = 1'b1;      // <<<< CHANGED: Set taken to ensure flush
+                                              // PC update uses take_return_pc path in fetch
+                end
                 PRIV: if(literal[11:0]==12'h0) hlt_out=1'b1; // HALT
                 default: result = 64'b0;
             endcase
