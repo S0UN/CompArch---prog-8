@@ -1,12 +1,7 @@
-// Verilog code for Tinker CPU Pipeline
-// Includes MEM->EX Forwarding integrated into tinker_core
-// Should pass arith_forwarding benchmark (Load-use hazards still not handled)
-
-`timescale 1ns / 1ps
 
 //############################################################################
 //## tinker_core (Top Level Module)
-//## CHANGED: Added Forwarding Logic directly in this module
+//## CHANGED: Integrated Forwarding Logic directly in this module
 //############################################################################
 module tinker_core (
     input clk,
@@ -94,7 +89,7 @@ module tinker_core (
         .pc_out(pc_if)
     );
 
-    memory memory (
+    memory memory ( // Renamed instance for clarity
         .clk(clk),
         .reset(reset),
         .inst_addr(pc_if),
@@ -134,36 +129,42 @@ module tinker_core (
     registerFile reg_file (
         .clk(clk),
         .reset(reset),
+        // Write Port
         .write_addr(rd_addr_mem),
         .write_data(reg_wdata_wb),
         .write_enable(reg_write_mem),
+        // Read Port 1 (rs)
         .read_addr1(rs_addr_de),
         .read_data1(operand_a_de),
+        // Read Port 2 (rt)
         .read_addr2(rt_addr_de),
         .read_data2(regfile_operand_b_de),
+        // Read Port 3 (rd)
         .read_addr3(rd_addr_de),
         .read_data3(operand_c_de),
+        // Stack Pointer
         .stack_ptr_out(stack_ptr_de)
     );
 
     reglitmux input_selector (
         .sel(opcode_de),
-        .reg_in(regfile_operand_b_de),
+        .reg_in(regfile_operand_b_de), // rt_data input
         .lit_in(literal_de),
-        .out(operand_b_de)
+        .out(operand_b_de)           // rt_data or literal output
     );
 
     de_ex_register de_ex_reg (
         .clk(clk),
         .flush(flush_ex),
+        // Inputs from Decode Stage
         .pc_in(pc_de),
-        .operand_a_in(operand_a_de),
-        .operand_b_in(operand_b_de),
-        .operand_c_in(operand_c_de),
+        .operand_a_in(operand_a_de), // rs_data
+        .operand_b_in(operand_b_de), // rt_data or literal
+        .operand_c_in(operand_c_de), // rd_data
         .literal_in(literal_de),
-        .rd_addr_in(rd_addr_de),
-        .rs_addr_in(rs_addr_de),
-        .rt_addr_in(rt_addr_de),
+        .rd_addr_in(rd_addr_de),     // Destination address
+        .rs_addr_in(rs_addr_de),     // Source address 1
+        .rt_addr_in(rt_addr_de),     // Source address 2
         .opcode_in(opcode_de),
         .stack_ptr_in(stack_ptr_de),
         .alu_enable_in(alu_enable_de),
@@ -173,12 +174,13 @@ module tinker_core (
         .mem_to_reg_in(mem_to_reg_de),
         .branch_taken_ctrl_in(branch_taken_ctrl_de),
         .mem_pc_in(mem_pc_de),
+        // Outputs to Execute Stage
         .pc_out(pc_ex),
         .operand_a_out(operand_a_ex),
         .operand_b_out(operand_b_ex),
-        .operand_c_out(operand_c_ex),
+        .operand_c_out(operand_c_ex), // Pipelined rd_data
         .literal_out(literal_ex),
-        .rd_addr_out(rd_addr_ex),
+        .rd_addr_out(rd_addr_ex),     // Pipelined destination address
         .rs_addr_out(rs_addr_ex),
         .rt_addr_out(rt_addr_ex),
         .opcode_out(opcode_ex),
@@ -188,30 +190,30 @@ module tinker_core (
         .mem_write_out(mem_write_ex),
         .reg_write_out(reg_write_ex),
         .mem_to_reg_out(mem_to_reg_ex),
-        .branch_taken_ctrl_out(),
+        .branch_taken_ctrl_out(),     // This output seems unused now
         .mem_pc_out(mem_pc_ex)
     );
 
     // *** ADDED: Forwarding Logic (MEM -> EX) ***
-    // Hazard condition: Instruction in MEM stage writes to a register (reg_write_mem=1)
-    //                   AND that register's address (rd_addr_mem) matches
-    //                   a source register address needed in EX stage (rs_addr_ex or rt_addr_ex)
-    // Note: No check for rd_addr_mem != 0 because R0 is writable in this design.
+    // Detect hazard: instruction in MEM stage writes (reg_write_mem=1)
+    // to a register (rd_addr_mem) that matches a source needed in EX stage (rs_addr_ex or rt_addr_ex).
     assign forwardA_mem_ex = reg_write_mem && (rd_addr_mem == rs_addr_ex);
     assign forwardB_mem_ex = reg_write_mem && (rd_addr_mem == rt_addr_ex);
 
     // *** ADDED: Forwarding Muxes for ALU Inputs ***
-    assign alu_input1 = forwardA_mem_ex ? reg_wdata_wb : operand_a_ex; // Select Forwarded data or data from RegFile(rs)
-    assign alu_input2 = forwardB_mem_ex ? reg_wdata_wb : operand_b_ex; // Select Forwarded data or data from RegFile(rt)/Literal
+    // Select data being written back (reg_wdata_wb) if hazard detected, else use pipelined operand.
+    assign alu_input1 = forwardA_mem_ex ? reg_wdata_wb : operand_a_ex;
+    assign alu_input2 = forwardB_mem_ex ? reg_wdata_wb : operand_b_ex;
 
 
     // Execute Stage (ALU)
+    // CHANGED: ALU inputs now come from forwarding muxes
     alu calculation_unit (
         .alu_enable(alu_enable_ex),
         .opcode(opcode_ex),
-        .input1(alu_input1), // <<< CHANGED: Use muxed input
-        .input2(alu_input2), // <<< CHANGED: Use muxed input
-        .input3(operand_c_ex), // rd_data (no forwarding for this yet)
+        .input1(alu_input1), // <<< From fwd mux
+        .input2(alu_input2), // <<< From fwd mux
+        .input3(operand_c_ex), // rd_data (no forwarding implemented for this)
         .rd_addr(rd_addr_ex),
         .literal(literal_ex),
         .pc_in(pc_ex),
@@ -231,7 +233,7 @@ module tinker_core (
 
     ex_mem_register ex_mem_reg (
         .clk(clk),
-        .flush_mem(flush_ex), // Flush input connected
+        .flush_mem(flush_ex), // Connect flush signal
         // Inputs
         .result_in(alu_result_ex),
         .mem_addr_in(alu_mem_addr_ex),
@@ -271,11 +273,12 @@ module tinker_core (
         .mem_to_reg(mem_to_reg_mem),
         .readData(mem_rdata_mem),
         .aluResult(alu_result_mem),
-        .regWriteData(reg_wdata_wb)
+        .regWriteData(reg_wdata_wb) // This is the data potentially forwarded
     );
 
+    // --- Global Control Logic ---
     assign flush_de = branch_taken_mem;
-    assign flush_ex = branch_taken_mem;
+    assign flush_ex = branch_taken_mem; // Controls flush for DE/EX and EX/MEM
     assign take_return_pc_fetch = mem_pc_mem;
     assign hlt = hlt_mem;
 
@@ -337,8 +340,8 @@ module instructionDecoder (
                CALL=12, RETURN=13, BRGT=14, PRIV=15, MOV_MEM=16, MOV_REG=17, MOV_LIT=18, MOV_STR=19,
                ADDF=20, SUBF=21, MULF=22, DIVF=23, ADD=24, ADDI=25, SUB=26, SUBI=27, MUL=28, DIV=29;
     always @(*) begin
-        opcode=instructionLine[31:27]; rd=instructionLine[26:22]; rs=instructionLine[21:17]; rt=instructionLine[16:12];
-        literal={{52{1'b0}}, instructionLine[11:0]};
+        opcode = instructionLine[31:27]; rd = instructionLine[26:22]; rs = instructionLine[21:17]; rt = instructionLine[16:12];
+        literal = {{52{1'b0}}, instructionLine[11:0]};
         alu_enable=0; mem_read=0; mem_write=0; reg_write=0; mem_to_reg=0; branch_taken=0; mem_pc=0;
         case (opcode)
             ADD,SUB,MUL,DIV,AND,OR,XOR,NOT,SHFTR,SHFTL: begin alu_enable=1; reg_write=1; mem_to_reg=0; end
