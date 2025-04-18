@@ -490,7 +490,7 @@ endmodule
 
 //############################################################################
 //## alu
-//## CHANGED: Set branch_taken = 1 for RETURN to ensure flush
+//## CHANGED: Corrected BRR logic to use input3 (rd_data) for offset
 //############################################################################
 module alu (
     // Control Inputs
@@ -539,40 +539,56 @@ module alu (
 
         if (alu_enable) begin
             case (opcode)
-                // ... other cases ...
+                // Integer Arithmetic
                 ADD, ADDI: result = $signed(input1) + $signed(input2);
                 SUB, SUBI: result = $signed(input1) - $signed(input2);
                 MUL: result = $signed(input1) * $signed(input2);
-                DIV: if (input2 != 0) result = $signed(input1) / $signed(input2); else result = 64'b0;
+                DIV: if (input2 != 0) result = $signed(input1) / $signed(input2); else result = 64'b0; // Basic div by zero check
+
+                // Logical
                 AND: result = input1 & input2;
                 OR:  result = input1 | input2;
                 XOR: result = input1 ^ input2;
                 NOT: result = ~input1;
+
+                // Shift
                 SHFTR, SHFTRI: result = input1 >> input2[5:0];
                 SHFTL, SHFTLI: result = input1 << input2[5:0];
-                MOV_MEM: mem_addr = input1 + $signed(input2);
-                MOV_REG: result = input1;
-                MOV_LIT: result = {input1[63:12], input2[11:0]};
-                MOV_STR: begin mem_addr=input3+$signed(literal); mem_wdata=input1; end
+
+                // Data Movement
+                MOV_MEM: mem_addr = input1 + $signed(input2); // rs + L
+                MOV_REG: result = input1; // Pass rs
+                MOV_LIT: result = {input1[63:12], input2[11:0]}; // Load literal low
+                MOV_STR: begin mem_addr=input3+$signed(literal); mem_wdata=input1; end // rd_data + L <- rs_data
+
+                // Floating Point (Simulation only)
                 ADDF, SUBF, MULF, DIVF: result = 64'b0;
-                BR: begin branch_pc = input3; branch_taken = 1'b1; end
-                BRR: begin branch_pc = pc_in + $signed(input1); branch_taken = 1'b1; end
-                BRRI: begin branch_pc = pc_in + $signed(input2); branch_taken = 1'b1; end
-                BRNZ: begin if ($signed(input1)!=0) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end
-                BRGT: begin if ($signed(input1)>$signed(input2)) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end
-                CALL: begin branch_pc=input3; mem_addr=stack_ptr-8; mem_wdata=pc_in+4; branch_taken=1'b1; end
-                RETURN: begin
-                    mem_addr = stack_ptr - 8; // Address to read return PC from
-                    branch_taken = 1'b1;      // <<<< CHANGED: Set taken to ensure flush
-                                              // PC update uses take_return_pc path in fetch
+
+                // Control Flow - Branches
+                BR: begin branch_pc = input3; branch_taken = 1'b1; end // Target is rd_data
+
+                // <<<< CORRECTED THIS CASE >>>>
+                BRR: begin // brr rd [cite: 117, 118]
+                    branch_pc = pc_in + $signed(input3); // Target is PC + rd_data
+                    branch_taken = 1'b1;
                 end
+
+                BRRI: begin branch_pc = pc_in + $signed(input2); branch_taken = 1'b1; end // Target is PC + literal
+                BRNZ: begin if ($signed(input1)!=0) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end // Target rd_data if rs_data!=0
+                BRGT: begin if ($signed(input1)>$signed(input2)) begin branch_pc=input3; branch_taken=1'b1; end else branch_taken=1'b0; end // Target rd_data if rs_data>rt_data
+
+                // Control Flow - Subroutines
+                CALL: begin branch_pc=input3; mem_addr=stack_ptr-8; mem_wdata=pc_in+4; branch_taken=1'b1; end // Target rd_data
+                RETURN: begin mem_addr=stack_ptr-8; branch_taken=1'b1; end // Set taken for flush
+
+                // Privileged - Halt
                 PRIV: if(literal[11:0]==12'h0) hlt_out=1'b1; // HALT
+
                 default: result = 64'b0;
             endcase
         end
     end
 endmodule
-
 //############################################################################
 //## ex_mem_register
 //## CHANGED: Added flush input to cancel control signals for flushed instructions
