@@ -310,9 +310,7 @@ module alu (
                 ADDF, SUBF, MULF, DIVF: result = 64'b0; // FP ops skipped
                 BR: begin branch_pc = input3; branch_taken = 1'b1; end // Unconditional branch to rd_data
                 BRR: begin branch_pc = pc_in + $signed(input3); branch_taken = 1'b1; end // PC + rd_data
-                BRRI: begin branch_pc = pc_in + $signed(literal); branchгранич
-
-_taken = 1'b1; end // PC + literal
+                BRRI: begin branch_pc = pc_in + $signed(literal); branch_taken = 1'b1; end // PC + literal
                 BRNZ: begin 
                     branch_pc = input3; // Target is rd_data
                     branch_taken = ($signed(input1) != 0); 
