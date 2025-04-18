@@ -63,7 +63,13 @@ module tinker_core (
     logic [63:0] return_pc_mem;
 
     // MEM/WB Stage
-    logic [63:0] reg_wdata_wb;
+    logic [63:0] reg_wdata_wb; // Data being written back
+
+    // --- Forwarding Signals --- ADDED
+    logic forwardA_mem_ex;      // Control for forwarding MEM->EX for ALU input A
+    logic forwardB_mem_ex;      // Control for forwarding MEM->EX for ALU input B
+    logic [63:0] alu_input1;    // Final value going into ALU input1 after muxing
+    logic [63:0] alu_input2;    // Final value going into ALU input2 after muxing
 
     // --- Control Signals ---
     logic flush_de, flush_ex;
@@ -114,7 +120,7 @@ module tinker_core (
         .mem_write(mem_write_de),
         .reg_write(reg_write_de),
         .mem_to_reg(mem_to_reg_de),
-        .branch_taken(branch_taken_ctrl_de),
+        .branch_taken(branch_taken_ctrl_de), // Indicates branch type
         .mem_pc(mem_pc_de)
     );
 
@@ -186,25 +192,38 @@ module tinker_core (
         .mem_pc_out(mem_pc_ex)
     );
 
+    // *** ADDED: Forwarding Unit Instantiation ***
+    forwardingUnit fwd_unit (
+        .rs_addr_ex(rs_addr_ex),
+        .rt_addr_ex(rt_addr_ex),
+        .rd_addr_mem(rd_addr_mem),
+        .reg_write_mem(reg_write_mem),
+        .forwardA(forwardA_mem_ex),
+        .forwardB(forwardB_mem_ex)
+    );
+
+    // *** ADDED: Forwarding Muxes for ALU Inputs ***
+    assign alu_input1 = forwardA_mem_ex ? reg_wdata_wb : operand_a_ex;
+    assign alu_input2 = forwardB_mem_ex ? reg_wdata_wb : operand_b_ex;
+
+    // Execute Stage (ALU)
+    // CHANGED: ALU inputs now come from forwarding muxes
     alu calculation_unit (
         .alu_enable(alu_enable_ex),
         .opcode(opcode_ex),
-        // Data Inputs from DE/EX
-        .input1(operand_a_ex), // Pipelined rs_data (or rd_data for I-types)
-        .input2(operand_b_ex), // Pipelined rt_data or literal
-        .input3(operand_c_ex), // Pipelined rd_data
-        .rd_addr(rd_addr_ex),  // Pipelined destination register address
+        .input1(alu_input1), // From fwd mux
+        .input2(alu_input2), // From fwd mux
+        .input3(operand_c_ex), // rd_data (forwarding not implemented for this)
+        .rd_addr(rd_addr_ex),
         .literal(literal_ex),
         .pc_in(pc_ex),
         .stack_ptr(stack_ptr_ex),
-        // Outputs to EX/MEM Register
         .result(alu_result_ex),
         .mem_addr(alu_mem_addr_ex),
         .mem_wdata(alu_mem_data_ex),
         .branch_pc(alu_branch_pc_ex),
         .branch_taken(branch_taken_ex),
         .hlt_out(hlt_ex),
-        // Control Inputs Pass-through (needed if ALU logic used them)
         .mem_read_in(mem_read_ex),
         .mem_write_in(mem_write_ex),
         .reg_write_in(reg_write_ex),
@@ -214,27 +233,26 @@ module tinker_core (
 
     ex_mem_register ex_mem_reg (
         .clk(clk),
-        .flush_mem(flush_ex), // <--- ADDED THIS CONNECTION
-        // Inputs from Execute Stage
+        .flush_mem(flush_ex), // Connect flush signal
+        // Inputs
         .result_in(alu_result_ex),
         .mem_addr_in(alu_mem_addr_ex),
         .mem_wdata_in(alu_mem_data_ex),
         .branch_pc_in(alu_branch_pc_ex),
-        .rd_addr_in(rd_addr_ex), // Pass destination addr
+        .rd_addr_in(rd_addr_ex),
         .hlt_in(hlt_ex),
-        // Control Inputs (from DE/EX outputs)
         .mem_read_in(mem_read_ex),
         .mem_write_in(mem_write_ex),
         .reg_write_in(reg_write_ex),
         .mem_to_reg_in(mem_to_reg_ex),
-        .branch_taken_in(branch_taken_ex), // Decision from ALU
+        .branch_taken_in(branch_taken_ex),
         .mem_pc_in(mem_pc_ex),
-        // Outputs to Memory/Writeback Stage
+        // Outputs
         .result_out(alu_result_mem),
         .mem_addr_out(mem_addr_mem),
         .mem_wdata_out(mem_wdata_mem),
         .branch_pc_out(branch_pc_mem),
-        .rd_addr_out(rd_addr_mem), // Output destination addr
+        .rd_addr_out(rd_addr_mem),
         .hlt_out(hlt_mem),
         .mem_read_out(mem_read_mem),
         .mem_write_out(mem_write_mem),
@@ -258,10 +276,40 @@ module tinker_core (
         .regWriteData(reg_wdata_wb)
     );
 
+    // --- Global Control Logic ---
     assign flush_de = branch_taken_mem;
-    assign flush_ex = branch_taken_mem;
+    assign flush_ex = branch_taken_mem; // Controls flush for DE/EX and EX/MEM
     assign take_return_pc_fetch = mem_pc_mem;
     assign hlt = hlt_mem;
+
+endmodule
+
+
+module forwardingUnit (
+    // Inputs from EX stage (register sources being used)
+    input logic [4:0] rs_addr_ex,
+    input logic [4:0] rt_addr_ex,
+
+    // Inputs from MEM stage (register destination being written)
+    input logic [4:0] rd_addr_mem,    // Destination register of instruction in MEM
+    input logic       reg_write_mem,  // Write enable for instruction in MEM
+
+    // Outputs: Control signals for ALU input Muxes
+    output logic      forwardA,       // Select forwarded data for ALU input A (rs)
+    output logic      forwardB        // Select forwarded data for ALU input B (rt)
+);
+
+    // Check if MEM stage instruction writes to a register (and it's not R0)
+    logic mem_writes_reg;
+    assign mem_writes_reg = reg_write_mem && (rd_addr_mem != 5'b0);
+
+    // Forwarding condition for ALU Input A (operand comes from rs)
+    assign forwardA = mem_writes_reg && (rd_addr_mem == rs_addr_ex);
+
+    // Forwarding condition for ALU Input B (operand comes from rt)
+    // Note: We only forward if the *register* rt is needed, not if a literal is used.
+    // The reglitmux handles selecting literal vs register *before* the forward mux.
+    assign forwardB = mem_writes_reg && (rd_addr_mem == rt_addr_ex);
 
 endmodule
 
