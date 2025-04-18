@@ -1,6 +1,6 @@
 //############################################################################
 //## tinker_core (Top Level Module)
-//## CHANGED: Simplified Load-Use Stall (Bubble Insertion Only)
+//## CHANGED: Modified forwardingUnit to allow forwarding results destined for R0
 //############################################################################
 module tinker_core (
     input clk,
@@ -8,7 +8,6 @@ module tinker_core (
     output hlt
 );
     // --- Pipeline Stage Signals ---
-    // ... (Signals remain the same as before) ...
     logic [63:0] pc_if;
     logic [31:0] instruction_if;
     logic [63:0] pc_de;
@@ -39,118 +38,33 @@ module tinker_core (
     logic [1:0] forward_b_select;
     logic [1:0] forward_c_select;
 
-    // --- Hazard/Stall Signals --- // STALL SIMPLIFIED
-    logic stall_de;           // Stall DE stage due to load-use hazard
-    logic de_ex_bubble_enable;// Insert bubble into DE/EX register
-
     // --- Control Signals ---
-    logic flush_de_branch, flush_ex_branch; // Branch flush signals
-    logic take_return_pc_fetch; // RETURN instruction control
+    logic flush_de_branch, flush_ex_branch;
+    logic take_return_pc_fetch;
 
     // --- Module Instantiations ---
 
-    // Detect Load-Use Hazard
-    hazardDetectionUnit hazard_unit (
-        .rs_addr_de(rs_addr_de),
-        .rt_addr_de(rt_addr_de),
-        .rd_addr_ex(rd_addr_ex),
-        .mem_read_ex(mem_read_ex), // Check if instr in EX is a memory read
-        .stall_de(stall_de)
-    );
-
-    // Calculate DE/EX bubble control // STALL SIMPLIFIED
-    // Bubble only if stalled (and not flushed by branch later in de_ex_reg)
-    assign de_ex_bubble_enable = stall_de;
-
-    // Fetch Stage (No stall control needed here anymore)
-    fetch instruction_fetcher (
-        .clk(clk),
-        .reset(reset),
-        // .pc_write_enable(1'b1), // Removed - PC update controlled by branch/return only
-        .branch_taken(branch_taken_mem),
-        .branch_pc(branch_pc_mem),
-        .take_return_pc(take_return_pc_fetch),
-        .return_pc(return_pc_mem),
-        .pc_out(pc_if)
-    );
-
+    // Fetch Stage
+    fetch instruction_fetcher ( .clk(clk), .reset(reset), .branch_taken(branch_taken_mem), .branch_pc(branch_pc_mem), .take_return_pc(take_return_pc_fetch), .return_pc(return_pc_mem), .pc_out(pc_if) );
     // Memory Module
-    memory memory (
-        .clk(clk),
-        .reset(reset),
-        .inst_addr(pc_if),
-        .instruction_out(instruction_if),
-        .data_addr(mem_addr_mem),
-        .data_wdata(mem_wdata_mem),
-        .mem_read(mem_read_mem),
-        .mem_write(mem_write_mem),
-        .data_rdata(mem_rdata_mem)
-    );
-
-    // IF/DE Register Stage (No stall control needed here anymore)
-    if_de_register if_de_reg (
-        .clk(clk),
-        // .write_enable(1'b1), // Removed - always enabled unless flushed
-        .flush(flush_de_branch), // Controlled by branch flush
-        .pc_in(pc_if),
-        .instruction_in(instruction_if),
-        .pc_out(pc_de),
-        .instruction_out(instruction_de)
-    );
-
+    memory memory ( .clk(clk), .reset(reset), .inst_addr(pc_if), .instruction_out(instruction_if), .data_addr(mem_addr_mem), .data_wdata(mem_wdata_mem), .mem_read(mem_read_mem), .mem_write(mem_write_mem), .data_rdata(mem_rdata_mem) );
+    // IF/DE Register Stage
+    if_de_register if_de_reg ( .clk(clk), .flush(flush_de_branch), .pc_in(pc_if), .instruction_in(instruction_if), .pc_out(pc_de), .instruction_out(instruction_de) );
     // Decode Stage Components
-    instructionDecoder instruction_parser (
-        .instructionLine(instruction_de), .literal(literal_de), .rd(rd_addr_de), .rs(rs_addr_de), .rt(rt_addr_de), .opcode(opcode_de),
-        .alu_enable(alu_enable_de), .mem_read(mem_read_de), .mem_write(mem_write_de), .reg_write(reg_write_de), .mem_to_reg(mem_to_reg_de),
-        .branch_taken(branch_taken_ctrl_de), .mem_pc(mem_pc_de)
-    );
-    registerFile reg_file (
-        .clk(clk), .reset(reset), .write_addr(rd_addr_mem), .write_data(reg_wdata_wb), .write_enable(reg_write_mem),
-        .read_addr1(rs_addr_de), .read_data1(regfile_operand_a_de), .read_addr2(rt_addr_de), .read_data2(regfile_operand_b_de),
-        .read_addr3(rd_addr_de), .read_data3(regfile_operand_c_de), .stack_ptr_out(stack_ptr_de)
-    );
-    forwardingUnit fwd_unit (
-        .rs_addr_de(rs_addr_de), .rt_addr_de(rt_addr_de), .rd_addr_de(rd_addr_de), .rd_addr_ex(rd_addr_ex), .reg_write_ex(reg_write_ex),
-        .rd_addr_mem(rd_addr_mem), .reg_write_mem(reg_write_mem), .forward_a_select(forward_a_select), .forward_b_select(forward_b_select), .forward_c_select(forward_c_select)
-    );
+    instructionDecoder instruction_parser ( .instructionLine(instruction_de), .literal(literal_de), .rd(rd_addr_de), .rs(rs_addr_de), .rt(rt_addr_de), .opcode(opcode_de), .alu_enable(alu_enable_de), .mem_read(mem_read_de), .mem_write(mem_write_de), .reg_write(reg_write_de), .mem_to_reg(mem_to_reg_de), .branch_taken(branch_taken_ctrl_de), .mem_pc(mem_pc_de) );
+    registerFile reg_file ( .clk(clk), .reset(reset), .write_addr(rd_addr_mem), .write_data(reg_wdata_wb), .write_enable(reg_write_mem), .read_addr1(rs_addr_de), .read_data1(regfile_operand_a_de), .read_addr2(rt_addr_de), .read_data2(regfile_operand_b_de), .read_addr3(rd_addr_de), .read_data3(regfile_operand_c_de), .stack_ptr_out(stack_ptr_de) );
+    // Forwarding Logic
+    forwardingUnit fwd_unit ( .rs_addr_de(rs_addr_de), .rt_addr_de(rt_addr_de), .rd_addr_de(rd_addr_de), .rd_addr_ex(rd_addr_ex), .reg_write_ex(reg_write_ex), .rd_addr_mem(rd_addr_mem), .reg_write_mem(reg_write_mem), .forward_a_select(forward_a_select), .forward_b_select(forward_b_select), .forward_c_select(forward_c_select) );
     forwardingMux forwardingMuxA ( .select(forward_a_select), .data_regfile(regfile_operand_a_de), .data_ex(alu_result_ex), .data_mem(reg_wdata_wb), .forwarded_data(operand_a_de) );
     forwardingMux forwardingMuxB ( .select(forward_b_select), .data_regfile(regfile_operand_b_de), .data_ex(alu_result_ex), .data_mem(reg_wdata_wb), .forwarded_data(operand_b_reg_maybe_fwd) );
     forwardingMux forwardingMuxC ( .select(forward_c_select), .data_regfile(regfile_operand_c_de), .data_ex(alu_result_ex), .data_mem(reg_wdata_wb), .forwarded_data(operand_c_de) );
     reglitmux input_selector ( .sel(opcode_de), .reg_in(operand_b_reg_maybe_fwd), .lit_in(literal_de), .out(operand_b_de) );
-
     // DE/EX Register Stage
-    de_ex_register de_ex_reg (
-        .clk(clk),
-        .flush(flush_ex_branch),   // Controlled by branch flush
-        .bubble_enable(de_ex_bubble_enable), // Controlled by stall detection
-        // Inputs
-        .pc_in(pc_de), .operand_a_in(operand_a_de), .operand_b_in(operand_b_de), .operand_c_in(operand_c_de), .literal_in(literal_de),
-        .rd_addr_in(rd_addr_de), .rs_addr_in(rs_addr_de), .rt_addr_in(rt_addr_de), .opcode_in(opcode_de), .stack_ptr_in(stack_ptr_de),
-        .alu_enable_in(alu_enable_de), .mem_read_in(mem_read_de), .mem_write_in(mem_write_de), .reg_write_in(reg_write_de), .mem_to_reg_in(mem_to_reg_de), .branch_taken_ctrl_in(branch_taken_ctrl_de), .mem_pc_in(mem_pc_de),
-        // Outputs
-        .pc_out(pc_ex), .operand_a_out(operand_a_ex), .operand_b_out(operand_b_ex), .operand_c_out(operand_c_ex), .literal_out(literal_ex),
-        .rd_addr_out(rd_addr_ex), .rs_addr_out(rs_addr_ex), .rt_addr_out(rt_addr_ex), .opcode_out(opcode_ex), .stack_ptr_out(stack_ptr_ex),
-        .alu_enable_out(alu_enable_ex), .mem_read_out(mem_read_ex), .mem_write_out(mem_write_ex), .reg_write_out(reg_write_ex), .mem_to_reg_out(mem_to_reg_ex),
-        .branch_taken_ctrl_out(), .mem_pc_out(mem_pc_ex)
-    );
-
+    de_ex_register de_ex_reg ( .clk(clk), .flush(flush_ex_branch), .pc_in(pc_de), .operand_a_in(operand_a_de), .operand_b_in(operand_b_de), .operand_c_in(operand_c_de), .literal_in(literal_de), .rd_addr_in(rd_addr_de), .rs_addr_in(rs_addr_de), .rt_addr_in(rt_addr_de), .opcode_in(opcode_de), .stack_ptr_in(stack_ptr_de), .alu_enable_in(alu_enable_de), .mem_read_in(mem_read_de), .mem_write_in(mem_write_de), .reg_write_in(reg_write_de), .mem_to_reg_in(mem_to_reg_de), .branch_taken_ctrl_in(branch_taken_ctrl_de), .mem_pc_in(mem_pc_de), .pc_out(pc_ex), .operand_a_out(operand_a_ex), .operand_b_out(operand_b_ex), .operand_c_out(operand_c_ex), .literal_out(literal_ex), .rd_addr_out(rd_addr_ex), .rs_addr_out(rs_addr_ex), .rt_addr_out(rt_addr_ex), .opcode_out(opcode_ex), .stack_ptr_out(stack_ptr_ex), .alu_enable_out(alu_enable_ex), .mem_read_out(mem_read_ex), .mem_write_out(mem_write_ex), .reg_write_out(reg_write_ex), .mem_to_reg_out(mem_to_reg_ex), .branch_taken_ctrl_out(), .mem_pc_out(mem_pc_ex) );
     // Execute Stage
-    alu calculation_unit (
-        .alu_enable(alu_enable_ex), .opcode(opcode_ex), .input1(operand_a_ex), .input2(operand_b_ex), .input3(operand_c_ex),
-        .rd_addr(rd_addr_ex), .literal(literal_ex), .pc_in(pc_ex), .stack_ptr(stack_ptr_ex),
-        .result(alu_result_ex), .mem_addr(alu_mem_addr_ex), .mem_wdata(alu_mem_data_ex), .branch_pc(alu_branch_pc_ex), .branch_taken(branch_taken_ex), .hlt_out(hlt_ex),
-        .mem_read_in(mem_read_ex), .mem_write_in(mem_write_ex), .reg_write_in(reg_write_ex), .mem_to_reg_in(mem_to_reg_ex), .mem_pc_in(mem_pc_ex)
-    );
-
+    alu calculation_unit ( .alu_enable(alu_enable_ex), .opcode(opcode_ex), .input1(operand_a_ex), .input2(operand_b_ex), .input3(operand_c_ex), .rd_addr(rd_addr_ex), .literal(literal_ex), .pc_in(pc_ex), .stack_ptr(stack_ptr_ex), .result(alu_result_ex), .mem_addr(alu_mem_addr_ex), .mem_wdata(alu_mem_data_ex), .branch_pc(alu_branch_pc_ex), .branch_taken(branch_taken_ex), .hlt_out(hlt_ex), .mem_read_in(mem_read_ex), .mem_write_in(mem_write_ex), .reg_write_in(reg_write_ex), .mem_to_reg_in(mem_to_reg_ex), .mem_pc_in(mem_pc_ex) );
     // EX/MEM Register Stage
-    ex_mem_register ex_mem_reg (
-        .clk(clk), .flush_mem(flush_ex_branch), .result_in(alu_result_ex), .mem_addr_in(alu_mem_addr_ex), .mem_wdata_in(alu_mem_data_ex),
-        .branch_pc_in(alu_branch_pc_ex), .rd_addr_in(rd_addr_ex), .hlt_in(hlt_ex), .mem_read_in(mem_read_ex), .mem_write_in(mem_write_ex),
-        .reg_write_in(reg_write_ex), .mem_to_reg_in(mem_to_reg_ex), .branch_taken_in(branch_taken_ex), .mem_pc_in(mem_pc_ex),
-        .result_out(alu_result_mem), .mem_addr_out(mem_addr_mem), .mem_wdata_out(mem_wdata_mem), .branch_pc_out(branch_pc_mem), .rd_addr_out(rd_addr_mem), .hlt_out(hlt_mem),
-        .mem_read_out(mem_read_mem), .mem_write_out(mem_write_mem), .reg_write_out(reg_write_mem), .mem_to_reg_out(mem_to_reg_mem), .branch_taken_out(branch_taken_mem), .mem_pc_out(mem_pc_mem)
-    );
-
+    ex_mem_register ex_mem_reg ( .clk(clk), .flush_mem(flush_ex_branch), .result_in(alu_result_ex), .mem_addr_in(alu_mem_addr_ex), .mem_wdata_in(alu_mem_data_ex), .branch_pc_in(alu_branch_pc_ex), .rd_addr_in(rd_addr_ex), .hlt_in(hlt_ex), .mem_read_in(mem_read_ex), .mem_write_in(mem_write_ex), .reg_write_in(reg_write_ex), .mem_to_reg_in(mem_to_reg_ex), .branch_taken_in(branch_taken_ex), .mem_pc_in(mem_pc_ex), .result_out(alu_result_mem), .mem_addr_out(mem_addr_mem), .mem_wdata_out(mem_wdata_mem), .branch_pc_out(branch_pc_mem), .rd_addr_out(rd_addr_mem), .hlt_out(hlt_mem), .mem_read_out(mem_read_mem), .mem_write_out(mem_write_mem), .reg_write_out(reg_write_mem), .mem_to_reg_out(mem_to_reg_mem), .branch_taken_out(branch_taken_mem), .mem_pc_out(mem_pc_mem) );
     // MEM Stage Muxes
     aluMemMux return_pc_selector ( .mem_pc(mem_pc_mem), .memData(mem_rdata_mem), .aluOut(branch_pc_mem), .newPc(return_pc_mem) );
     memRegMux data_source_selector ( .mem_to_reg(mem_to_reg_mem), .readData(mem_rdata_mem), .aluResult(alu_result_mem), .regWriteData(reg_wdata_wb) );
@@ -162,24 +76,8 @@ module tinker_core (
 endmodule
 
 //############################################################################
-//## hazardDetectionUnit (No Changes)
-//############################################################################
-module hazardDetectionUnit (
-    input logic [4:0] rs_addr_de, input logic [4:0] rt_addr_de,
-    input logic [4:0] rd_addr_ex, input logic mem_read_ex,
-    output logic stall_de
-);
-    always @(*) begin
-        if (mem_read_ex && (rd_addr_ex != 5'b0) && ((rd_addr_ex == rs_addr_de) || (rd_addr_ex == rt_addr_de)))
-            stall_de = 1'b1;
-        else
-            stall_de = 1'b0;
-    end
-endmodule
-
-
-//############################################################################
-//## forwardingUnit (No Changes)
+//## forwardingUnit
+//## CHANGED: Removed check for rd_addr != 0 to allow forwarding results destined for R0
 //############################################################################
 module forwardingUnit (
     input logic [4:0] rs_addr_de, input logic [4:0] rt_addr_de, input logic [4:0] rd_addr_de,
@@ -189,12 +87,15 @@ module forwardingUnit (
 );
     always @(*) begin
         forward_a_select = 2'b00; forward_b_select = 2'b00; forward_c_select = 2'b00; // Defaults
-        if (reg_write_ex && (rd_addr_ex != 5'b0) && (rd_addr_ex == rs_addr_de)) forward_a_select = 2'b01;
-        else if (reg_write_mem && (rd_addr_mem != 5'b0) && (rd_addr_mem == rs_addr_de)) forward_a_select = 2'b10;
-        if (reg_write_ex && (rd_addr_ex != 5'b0) && (rd_addr_ex == rt_addr_de)) forward_b_select = 2'b01;
-        else if (reg_write_mem && (rd_addr_mem != 5'b0) && (rd_addr_mem == rt_addr_de)) forward_b_select = 2'b10;
-        if (reg_write_ex && (rd_addr_ex != 5'b0) && (rd_addr_ex == rd_addr_de)) forward_c_select = 2'b01;
-        else if (reg_write_mem && (rd_addr_mem != 5'b0) && (rd_addr_mem == rd_addr_de)) forward_c_select = 2'b10;
+        // Operand A (rs) Forwarding
+        if (reg_write_ex && (rd_addr_ex == rs_addr_de)) forward_a_select = 2'b01; // EX Priority (Removed rd != 0 check)
+        else if (reg_write_mem && (rd_addr_mem == rs_addr_de)) forward_a_select = 2'b10; // MEM (Removed rd != 0 check)
+        // Operand B (rt) Forwarding
+        if (reg_write_ex && (rd_addr_ex == rt_addr_de)) forward_b_select = 2'b01; // EX Priority (Removed rd != 0 check)
+        else if (reg_write_mem && (rd_addr_mem == rt_addr_de)) forward_b_select = 2'b10; // MEM (Removed rd != 0 check)
+        // Operand C (rd used as source) Forwarding
+        if (reg_write_ex && (rd_addr_ex == rd_addr_de)) forward_c_select = 2'b01; // EX Priority (Removed rd != 0 check)
+        else if (reg_write_mem && (rd_addr_mem == rd_addr_de)) forward_c_select = 2'b10; // MEM (Removed rd != 0 check)
     end
 endmodule
 
@@ -223,72 +124,48 @@ module registerFile (
 );
     reg [63:0] registers [0:31]; integer idx;
     initial begin for (idx = 0; idx < 31; idx = idx + 1) registers[idx] = 64'b0; registers[31] = 64'h0008_0000; end
-    assign read_data1 = (read_addr1 == 5'd31) ? registers[31] : registers[read_addr1];
-    assign read_data2 = (read_addr2 == 5'd31) ? registers[31] : registers[read_addr2];
-    assign read_data3 = (read_addr3 == 5'd31) ? registers[31] : registers[read_addr3];
+    // R0 reads as 0, R31 reads as SP. Writes to R0 are ignored.
+    assign read_data1 = (read_addr1 == 5'd0) ? 64'b0 : (read_addr1 == 5'd31) ? registers[31] : registers[read_addr1];
+    assign read_data2 = (read_addr2 == 5'd0) ? 64'b0 : (read_addr2 == 5'd31) ? registers[31] : registers[read_addr2];
+    assign read_data3 = (read_addr3 == 5'd0) ? 64'b0 : (read_addr3 == 5'd31) ? registers[31] : registers[read_addr3];
     assign stack_ptr_out = registers[31];
-    always @(posedge clk) if (!reset && write_enable) registers[write_addr] <= write_data;
+    always @(posedge clk) if (!reset && write_enable && write_addr != 5'd0) registers[write_addr] <= write_data; // Ignore writes to R0
 endmodule
 
 //############################################################################
-//## fetch
-//## CHANGED: Removed pc_write_enable (Stall doesn't stop PC directly)
+//## fetch (No Changes)
 //############################################################################
 module fetch (
-    input clk,
-    input reset,
-    // input pc_write_enable, // Removed
-    input branch_taken,
-    input [63:0] branch_pc,
-    input take_return_pc,
-    input [63:0] return_pc,
-    output logic [63:0] pc_out
+    input clk, input reset, input branch_taken, input [63:0] branch_pc,
+    input take_return_pc, input [63:0] return_pc, output logic [63:0] pc_out
 );
-    localparam INITIAL_PC = 64'h2000;
-    reg [63:0] current_pc;
-    assign pc_out = current_pc;
-
+    localparam INITIAL_PC = 64'h2000; reg [63:0] current_pc; assign pc_out = current_pc;
     always @(posedge clk or posedge reset) begin
-        if (reset) begin
-            current_pc <= INITIAL_PC;
-        // else if (pc_write_enable) begin // Removed outer condition
-        end else begin // PC always updates unless reset
-            if (take_return_pc) current_pc <= return_pc;       // Priority for RETURN
-            else if (branch_taken) current_pc <= branch_pc;    // Then normal branches
-            else current_pc <= current_pc + 64'd4;             // Default increment
+        if (reset) current_pc <= INITIAL_PC;
+        else begin
+            if (take_return_pc) current_pc <= return_pc;
+            else if (branch_taken) current_pc <= branch_pc;
+            else current_pc <= current_pc + 64'd4;
         end
     end
 endmodule
 
 //############################################################################
-//## if_de_register
-//## CHANGED: Removed write_enable (Stall doesn't stop IF/DE directly)
+//## if_de_register (No Changes)
 //############################################################################
 module if_de_register (
-    input clk,
-    // input write_enable, // Removed
-    input flush,        // Branch flush signal
-    input [63:0] pc_in,
-    input [31:0] instruction_in,
-    output reg [63:0] pc_out,
-    output reg [31:0] instruction_out
+    input clk, input flush, input [63:0] pc_in, input [31:0] instruction_in,
+    output reg [63:0] pc_out, output reg [31:0] instruction_out
 );
     parameter NOP_INSTRUCTION = 32'b0;
-
     always @(posedge clk) begin
-        if (flush) begin // Flush still takes priority
-            pc_out <= 64'b0;
-            instruction_out <= NOP_INSTRUCTION; // Flush with NOP
-        // else if (write_enable) begin // Removed outer condition
-        end else begin // Always latch if not flushed
-            pc_out <= pc_in;
-            instruction_out <= instruction_in;
-        end
+        if (flush) begin pc_out <= 64'b0; instruction_out <= NOP_INSTRUCTION; end
+        else begin pc_out <= pc_in; instruction_out <= instruction_in; end
     end
 endmodule
 
 //############################################################################
-//## instructionDecoder (No changes)
+//## instructionDecoder (No Changes)
 //############################################################################
 module instructionDecoder (
     input [31:0] instructionLine, output reg [63:0] literal, output reg [4:0] rd, output reg [4:0] rs, output reg [4:0] rt, output reg [4:0] opcode,
@@ -316,11 +193,10 @@ module instructionDecoder (
 endmodule
 
 //############################################################################
-//## de_ex_register (No Changes from previous version with stall logic)
-//## bubble_enable still controlled by stall_de
+//## de_ex_register (No Changes)
 //############################################################################
 module de_ex_register (
-    input clk, input flush, input bubble_enable,
+    input clk, input flush, // Removed bubble_enable input
     input [63:0] pc_in, input [63:0] operand_a_in, input [63:0] operand_b_in, input [63:0] operand_c_in, input [63:0] literal_in,
     input [4:0] rd_addr_in, input [4:0] rs_addr_in, input [4:0] rt_addr_in, input [4:0] opcode_in, input [63:0] stack_ptr_in,
     input alu_enable_in, input mem_read_in, input mem_write_in, input reg_write_in, input mem_to_reg_in, input branch_taken_ctrl_in, input mem_pc_in,
@@ -331,7 +207,7 @@ module de_ex_register (
 );
     parameter NOP_OPCODE = 5'b0;
     always @(posedge clk) begin
-        if (flush || bubble_enable) begin // Flush still overrides bubble if both occur
+        if (flush) begin // Only flush logic remains
             pc_out <= 64'b0; operand_a_out <= 64'b0; operand_b_out <= 64'b0; operand_c_out <= 64'b0;
             literal_out <= 64'b0; rd_addr_out <= 5'b0; rs_addr_out <= 5'b0; rt_addr_out <= 5'b0;
             opcode_out <= NOP_OPCODE; stack_ptr_out <= 64'b0; alu_enable_out <= 1'b0;
@@ -409,6 +285,7 @@ module ex_mem_register (
         end
     end
 endmodule
+
 
 //############################################################################
 //## memory (No changes)
