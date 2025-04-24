@@ -1,8 +1,3 @@
 # CompArch---prog-8
-In a real processor, the MEMORY stage is heavily affected by cache performance, and specifically by the occurrence of cache misses. When the CPU attempts to access memory during load or store operations, it first checks if the data is available in the cache (a smaller, faster memory located closer to the CPU). If the data is present (a cache hit), access is fast. However, if the data is not present in the cache (a cache miss), the processor must fetch it from main memory (RAM), which is significantly slower — sometimes by an order of magnitude or more.
-
-In the context of this Verilog-based Tinker CPU, while there's no cache implemented in the current design, you can think of every memory access as effectively behaving like a cache miss, since all reads and writes go directly to the large bytes[] array. This further supports the reasoning that the MEMORY stage is the slowest, because in a real system, repeated cache misses would stall the pipeline or force it to wait until memory access is completed.
-
-The alu may also take a long time in a real cpu with operations such as division taking multiple cycles
-
+I initially designed the Tinker CPU as a multi-cycle system, executing each instruction sequentially across multiple clock cycles, which was simple but slow for programs like the Fibonacci test case. To enhance performance, I transitioned to a 5-stage pipelined architecture (IF, DE, EX, MEM, WB), enabling concurrent instruction processing to reduce execution time. This required adding pipeline registers to store intermediate data, implementing forwarding to resolve data hazards, and incorporating a hazard detection unit to stall for load-use hazards. The pipelined design significantly improved throughput, executing 100 instructions in approximately 104 cycles.
 euid: cvt372
